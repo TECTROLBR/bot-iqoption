@@ -1172,32 +1172,37 @@
             falarTexto("O sistema de áudio do analista está operacional.");
         }
 
-        function logAnalista(msg) {
-            const log = document.getElementById('analystLog');
-            const time = new Date().toLocaleTimeString();
-            // Adiciona a nova mensagem no TOPO (afterbegin) em vez de no final
-            log.insertAdjacentHTML('afterbegin', `<div><span style="color:#555">[${time}]</span> ${msg}</div>`);
-        }
-
-        async function verificarMensagensAnalista() {
+        async function verificarMensagensIA() {
             try {
-                const response = await fetch('/api/analista/mensagens');
+                const response = await fetch('/api/ia/mensagens');
                 const mensagens = await response.json();
                 
                 if (mensagens && mensagens.length > 0) {
-                    mensagens.forEach(msg => {
-                        logAnalista(msg);
-                        falarTexto(msg);
-                    });
+                    const log = document.getElementById('iaLog');
                     
-                    // Feedback visual
-                    const status = document.getElementById('analystStatus');
-                    status.style.color = '#00ff88';
-                    status.innerText = "Ajustando parâmetros...";
-                    setTimeout(() => { status.style.color = '#aaa'; status.innerText = "Monitorando desempenho..."; }, 3000);
+                    // Limpa o texto de espera se for a primeira mensagem
+                    if (log.innerText.includes("> Aguardando decisões da IA...")) {
+                        log.innerText = "";
+                    }
+
+                    mensagens.forEach(msg => {
+                        const div = document.createElement('div');
+                        div.style.marginBottom = "8px";
+                        div.style.borderBottom = "1px solid #333";
+                        div.style.paddingBottom = "4px";
+                        // Coloração básica para facilitar leitura
+                        if (msg.includes("BLOCK")) div.style.color = "#ff4444";
+                        else if (msg.includes("PROCEED") || msg.includes("CONFIRMADO")) div.style.color = "#00ff88";
+                        else div.style.color = "#e0e0e0";
+                        
+                        div.innerText = msg;
+                        
+                        // Adiciona no topo (mensagens novas aparecem em cima)
+                        log.prepend(div);
+                    });
                 }
             } catch (error) {
-                console.error("Erro no analista:", error);
+                console.error("Erro no log da IA:", error);
             }
         }
 

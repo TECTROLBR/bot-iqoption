@@ -3,6 +3,8 @@ from groq import Groq
 import threading
 from datetime import datetime
 import time
+import requests
+import json
 
 class BrainAI:
     def __init__(self, api_key):
@@ -114,7 +116,7 @@ Raw AI Response: {raw_response}
             
         return csv_string
 
-    def validar_sinal(self, sinal, historico_completo, contexto_tecnico=None):
+    def validar_sinal(self, sinal, historico_completo, contexto_tecnico=None, nota_aluna="", terreno=""):
         """
         Usa a IA da Groq para validar se um sinal de entrada é seguro.
         Retorna "PROCEED" ou "BLOCK".
@@ -127,6 +129,18 @@ Raw AI Response: {raw_response}
         if not historico_completo:
             return "BLOCK" # Não operar sem contexto
 
+        # --- FILTRO DE ECONOMIA DE TOKENS (RALLY) ---
+        # Se a Aluna detectou "BURACOS", nem incomoda o Professor (Groq).
+        if "BURACOS" in terreno:
+            self.log_pensamento(f"🛑 Aluna bloqueou chamada da API. Motivo: {terreno}")
+            return "BLOCK"
+
+        # Se a Aluna detectou "LAMA" (mercado lateral/sem direção), também bloqueia.
+        # Isso equivale ao voto "NEUTRO" ou de baixa confiança.
+        if "LAMA" in terreno:
+            self.log_pensamento(f"🛑 Aluna bloqueou chamada da API. Motivo: {terreno}")
+            return "BLOCK"
+
         # --- OTIMIZAÇÃO DE TOKENS (Prompt Ninja) ---
         # 1. Indicadores Técnicos (Calculados localmente em estrategias.py)
         indicadores_str = "N/A"
@@ -135,7 +149,7 @@ Raw AI Response: {raw_response}
             tendencia = contexto_tecnico.get('tendencia', 'Indefinida')
             bb = contexto_tecnico.get('bb')
             bb_str = f"BB_Width: {bb['bandwidth']:.5f}" if bb else "BB: N/A"
-            indicadores_str = f"RSI: {rsi:.1f}, Tendência: {tendencia}, {bb_str}"
+            indicadores_str = f"RSI: {rsi:.1f}, Tendência: {tendencia}, {bb_str}, Terreno: {terreno}"
 
         # 2. Price Action Recente (Apenas últimas 3 velas para contexto visual imediato)
         ultimas_velas = historico_completo[-3:]
@@ -149,6 +163,7 @@ Atue como trader algorítmico.
 Indicadores: {indicadores_str}
 Price Action (3 velas): {velas_str}
 Sinal: {sinal}
+Nota da Aluna (Regra Local): {nota_aluna}
 Ação (PROCEED/BLOCK)?
 """
 
@@ -175,3 +190,89 @@ Ação (PROCEED/BLOCK)?
             self.log_pensamento(f"Erro na API. Bloqueando por segurança: {e}")
             self._log_to_file(prompt, "BLOCK (API Error)", str(e))
             return "BLOCK" # Em caso de erro, bloqueia por segurança
+
+class StudentSLM:
+    """
+    IA Aluna (SLM Local - Qwen/Ollama):
+    1. Classifica o Terreno (Asfalto, Lama, Buracos).
+    2. Estuda o histórico recente e gera regras dinâmicas.
+    """
+    def __init__(self):
+        self.arquivo_dados = "brain_training_data.csv"
+        self.regra_atual = "Nenhuma regra definida ainda. Opere com cautela."
+        self.ollama_url = "http://localhost:11434/api/generate"
+        self.model = "qwen:0.5b" # Modelo leve sugerido
+        self._lock = threading.Lock()
+
+    def classificar_terreno(self, contexto):
+        """
+        Define o terreno atual baseado em indicadores técnicos.
+        Retorna: 'ASFALTO' (Tendência), 'LAMA' (Lateral), 'BURACOS' (Volatilidade).
+        """
+        if not contexto:
+            return "DESCONHECIDO"
+
+        tendencia = contexto.get('tendencia', 'LATERAL')
+        media_corpos = contexto.get('media_corpos', 0)
+        bb = contexto.get('bb', {})
+        bb_width = bb.get('bandwidth', 0) if bb else 0
+        atr = contexto.get('atr', 0)
+        
+        # 1. BURACOS: Volatilidade extrema
+        if bb_width > 0.00250 or (media_corpos > 0 and atr > media_corpos * 2.5):
+            return "BURACOS (Alta Volatilidade/Risco)"
+            
+        # 2. LAMA: Mercado Lateral ou Bandas muito estreitas
+        if tendencia == "LATERAL" or bb_width < 0.00030:
+            return "LAMA (Lateral/Choppy)"
+            
+        # 3. ASFALTO: Tendência definida
+        if tendencia in ["ALTA", "BAIXA"]:
+            return f"ASFALTO ({tendencia})"
+            
+        return "LAMA"
+
+    def estudar_professor(self):
+        """Lê o histórico e gera regra via Ollama."""
+        if not os.path.exists(self.arquivo_dados): return
+
+        print("🎓 IA Aluna: Iniciando estudo do diário de trades (Ollama)...")
+        try:
+            with open(self.arquivo_dados, "r", encoding="utf-8") as f:
+                linhas = f.readlines()
+                dados_recentes = linhas[-30:] # Janela de esquecimento
+
+            if len(dados_recentes) < 5: return
+
+            csv_texto = "".join(dados_recentes)
+            prompt = f"Analise este CSV de trades:\n{csv_texto}\nIdentifique padrões de LOSS. Gere UMA regra curta em Português (max 15 palavras) para evitar prejuízo."
+            
+            payload = {
+                "model": self.model, "prompt": prompt, "stream": False,
+                "options": {"temperature": 0.3, "num_ctx": 1024}
+            }
+            
+            response = requests.post(self.ollama_url, json=payload, timeout=30)
+            if response.status_code == 200:
+                nova_regra = response.json().get("response", "").strip()
+                if nova_regra:
+                    self.regra_atual = nova_regra
+                    print(f"🎓 IA Aluna (Nova Regra): {self.regra_atual}")
+        except Exception as e:
+            print(f"🚨 Falha ao estudar professor: {e}")
+
+    def registrar_telemetria(self, dados_mercado, decisao_ia, resultado_real, terreno):
+        """Salva dados enriquecidos."""
+        arquivo = "brain_training_data.csv"
+        with self._lock:
+            linha = f"{dados_mercado.get('votos_call',0)},{dados_mercado.get('votos_put',0)},{terreno},{decisao_ia},{resultado_real}\n"
+            try:
+                with open(arquivo, "a", encoding="utf-8") as f:
+                    f.write(linha)
+            except: pass
+
+    def prever(self, votos_call, votos_put):
+        """
+        Método de compatibilidade. Retorna 0.5 (Neutro) pois a decisão agora é via Regra/Terreno.
+        """
+        return 0.5

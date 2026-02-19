@@ -1,12 +1,12 @@
 import time
 import threading
-import webview
 import os
+import webview
 from collections import deque
 from flask import Flask, render_template, jsonify, request
 from iqoptionapi.stable_api import IQ_Option
 from datetime import datetime
-from brain import BrainAI
+from brain import BrainAI, StudentSLM
 from estrategias import GerenteEstrategia
 from financas import GerenteFinancas
 
@@ -15,8 +15,8 @@ app.json.sort_keys = False # Garante que o JSON respeite a ordem de prioridade (
 
 # --- CONFIGURAÇÕES ---
 # IMPORTANTE: Substitua pelas suas credenciais ou use variáveis de ambiente
-EMAIL = os.getenv("IQ_EMAIL", "seu_email_aqui")
-PASSWORD = os.getenv("IQ_PASSWORD", "sua_senha_aqui")
+EMAIL = os.getenv("IQ_EMAIL")
+PASSWORD = os.getenv("IQ_PASSWORD")
 
 # Variáveis Globais
 api = None
@@ -37,8 +37,8 @@ consecutive_errors = 0 # Contador para recalibração de humor da IA
 
 gerente_estrategia = GerenteEstrategia()
 gerente_financas = GerenteFinancas()
-# A chave agora é carregada das variáveis de ambiente ou usa um placeholder seguro
-ia_brain = BrainAI(api_key=os.getenv("GROQ_API_KEY", "SUA_CHAVE_AQUI"))
+ia_brain = BrainAI(api_key=os.getenv("GROQ_API_KEY")) # Carrega a chave do ambiente (bot_load.bat)
+ia_aluna = StudentSLM() # Inicializa a IA Local (SLM)
 
 def conectar_api():
     global api
@@ -105,7 +105,9 @@ def loop_checagem_resultados():
                     # --- TREINAMENTO PARALELO (ML) ---
                     if 'contexto_ml' in ordem:
                         resultado_real = "WIN" if win else "LOSS"
-                        ia_brain.registrar_experiencia(ordem['contexto_ml'], ordem['contexto_ml']['decisao_groq'], resultado_real)
+                        # Salva telemetria rica para a Aluna estudar
+                        terreno_op = ordem['contexto_ml'].get('terreno', 'DESCONHECIDO')
+                        ia_aluna.registrar_telemetria(ordem['contexto_ml'], ordem['contexto_ml']['decisao_groq'], resultado_real, terreno_op)
                         
                     ordens_em_andamento.remove(ordem)
             except Exception as e:
@@ -171,12 +173,12 @@ def loop_atualizacao_velas():
                                         score_ia['acertos_bloqueio'] += 1
                                         ia_brain.log_pensamento(f"✅ Validação: Bloqueio de CALL correto. Preço caiu (Loss evitado).")
                                         consecutive_errors = 0 # Reset: IA acertou
-                                        if contexto_ml_bloqueio: ia_brain.registrar_experiencia(contexto_ml_bloqueio, "BLOCK", "LOSS") # Se entrou seria LOSS
+                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, "BLOCK", "LOSS", contexto_ml_bloqueio.get('terreno'))
                                     elif fechamento_atual > entrada:
                                         score_ia['erros_bloqueio'] += 1
                                         ia_brain.log_pensamento(f"❌ Validação: Bloqueio de CALL incorreto. Preço subiu (Win perdido).")
                                         consecutive_errors += 1 # Erro: IA foi medrosa
-                                        if contexto_ml_bloqueio: ia_brain.registrar_experiencia(contexto_ml_bloqueio, "BLOCK", "WIN") # Se entrou seria WIN
+                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, "BLOCK", "WIN", contexto_ml_bloqueio.get('terreno'))
                                 
                                 # Lógica: Se bloqueou PUT, torcemos para subir (Loss evitado). Se cair, IA errou.
                                 elif sinal_bloqueado == "PUT":
@@ -184,12 +186,12 @@ def loop_atualizacao_velas():
                                         score_ia['acertos_bloqueio'] += 1
                                         ia_brain.log_pensamento(f"✅ Validação: Bloqueio de PUT correto. Preço subiu (Loss evitado).")
                                         consecutive_errors = 0 # Reset: IA acertou
-                                        if contexto_ml_bloqueio: ia_brain.registrar_experiencia(contexto_ml_bloqueio, "BLOCK", "LOSS") # Se entrou seria LOSS
+                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, "BLOCK", "LOSS", contexto_ml_bloqueio.get('terreno'))
                                     elif fechamento_atual < entrada:
                                         score_ia['erros_bloqueio'] += 1
                                         ia_brain.log_pensamento(f"❌ Validação: Bloqueio de PUT incorreto. Preço caiu (Win perdido).")
                                         consecutive_errors += 1 # Erro: IA foi medrosa
-                                        if contexto_ml_bloqueio: ia_brain.registrar_experiencia(contexto_ml_bloqueio, "BLOCK", "WIN") # Se entrou seria WIN
+                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, "BLOCK", "WIN", contexto_ml_bloqueio.get('terreno'))
                             
                             bloqueios_pendentes = [] # Limpa a fila após validar
 
@@ -199,7 +201,8 @@ def loop_atualizacao_velas():
                         # Salva o resultado das operações simuladas (Trading OFF) que acabaram de finalizar
                         for res in resultados_finalizados:
                             if 'contexto_ml' in res and res['contexto_ml']:
-                                ia_brain.registrar_experiencia(res['contexto_ml'], "PROCEED", res['resultado'])
+                                terreno_sim = res['contexto_ml'].get('terreno', 'DESCONHECIDO')
+                                ia_aluna.registrar_telemetria(res['contexto_ml'], "PROCEED", res['resultado'], terreno_sim)
 
                         resultado_op = gerente_financas.autorizar_operacao(lista_sinais)
                         # Se houver algum sinal detectado, processa cada um individualmente
@@ -208,10 +211,14 @@ def loop_atualizacao_velas():
                         historico_para_ml = list(historico_velas)[-200:]
                         historico_compactado_ml = ia_brain._compactar_historico_csv(historico_para_ml)
                         
+                        # --- CLASSIFICAÇÃO DE TERRENO (IA ALUNA) ---
+                        terreno_atual = ia_aluna.classificar_terreno(contexto_atual)
+                        
                         contexto_ml_atual = {
                             "votos_call": votos_call,
                             "votos_put": votos_put,
                             "historico_csv": historico_compactado_ml,
+                            "terreno": terreno_atual,
                             "decisao_groq": "PENDING"
                         }
                         
@@ -226,15 +233,26 @@ def loop_atualizacao_velas():
                                 print(f"⚠️ MODO RECALIBRAÇÃO: Ignorando histórico longo devido a {consecutive_errors} erros consecutivos. Focando no Price Action recente.")
                                 historico_analise = historico_analise[-15:] # Foca apenas nas últimas 15 velas
 
+                            # --- INJEÇÃO DE CONTEXTO DA ALUNA (RALLY) ---
+                            print(f"🎓 IA Aluna: Terreno identificado -> {terreno_atual}")
+                            print(f"📝 Nota da Aluna para o Professor: {ia_aluna.regra_atual}")
+
                             # --- NOVA VALIDAÇÃO COM GROQ AI ---
                             parecer_ia = ia_brain.validar_sinal(
                                 sinal=sinal,
                                 historico_completo=historico_analise,
-                                contexto_tecnico=contexto_atual
+                                contexto_tecnico=contexto_atual,
+                                nota_aluna=ia_aluna.regra_atual,
+                                terreno=terreno_atual
                             )
                             
                             contexto_ml_atual["decisao_groq"] = parecer_ia
 
+                            # LÓGICA DE DECISÃO FINAL (Híbrida)
+                            # Se a Groq bloquear, mas a Aluna tiver MUITA certeza (>80%), podemos arriscar (opcional)
+                            # Por enquanto, mantemos conservador: Se Groq bloquear, bloqueia.
+                            # Mas se Groq der erro, podemos usar a Aluna como backup.
+                            
                             if parecer_ia == "BLOCK":
                                 print(f"🧠 IA Groq BLOQUEOU a operação de {sinal}. Motivo: Risco de ir contra o fluxo/rompimento.")
                                 # Registra para validação na próxima vela (Shadow Tracking)
@@ -524,6 +542,14 @@ if __name__ == '__main__':
     # Inicia thread de checagem de resultados
     t_res = threading.Thread(target=loop_checagem_resultados, daemon=True)
     t_res.start()
+
+    # Loop de Estudo da IA Aluna (Roda a cada 10 minutos)
+    def loop_estudo_aluna():
+        while True:
+            time.sleep(600) # 10 minutos
+            ia_aluna.estudar_professor()
+            
+    threading.Thread(target=loop_estudo_aluna, daemon=True).start()
 
     # Cria a janela nativa da aplicação
     webview.create_window('Tela de Status', 'http://127.0.0.1:5000', width=1000, height=700)

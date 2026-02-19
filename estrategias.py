@@ -491,6 +491,28 @@ class GerenteEstrategia:
         rsi = 100 - (100 / (1 + rs))
         return rsi
 
+    def calcular_atr(self, historico, periodo=14):
+        """Calcula o Average True Range (Volatilidade Real)"""
+        if len(historico) < periodo + 1:
+            return 0.0
+        
+        tr_sum = 0.0
+        # Pega as velas necessárias (periodo + 1 para calcular variações)
+        fatia = historico[-(periodo+1):]
+        
+        for i in range(1, len(fatia)):
+            atual = fatia[i]
+            anterior = fatia[i-1]
+            
+            hl = atual['max'] - atual['min']
+            hc = abs(atual['max'] - anterior['close'])
+            lc = abs(atual['min'] - anterior['close'])
+            
+            tr = max(hl, hc, lc)
+            tr_sum += tr
+            
+        return tr_sum / periodo
+
     def calcular_suporte_resistencia(self, historico, periodo=50):
         """Identifica zonas de S/R baseadas em máximas e mínimas recentes"""
         if len(historico) < periodo:
@@ -560,6 +582,7 @@ class GerenteEstrategia:
         vol_med = self.calcular_media_volume(historico)
         bb = self.calcular_bollinger(historico)
         trend_m5 = self.calcular_tendencia_m5(historico)
+        atr = self.calcular_atr(historico) # Sensor de Volatilidade
         
         return {
             "media_20": media_20,
@@ -569,7 +592,8 @@ class GerenteEstrategia:
             "sr": sr,
             "vol_medio": vol_med,
             "bb": bb,
-            "tendencia_m5": trend_m5
+            "tendencia_m5": trend_m5,
+            "atr": atr
         }
 
     def validar_filtros(self, vela, config, contexto, tendencia_requerida=None, tendencia_especifica=None):

@@ -1,0 +1,1295 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tela de Status</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>">
+    <style>
+        :root {
+            --bg-color: #121212;
+            --card-bg: #1e1e1e;
+            --text-color: #e0e0e0;
+            --accent-color: #00ff88;
+            --secondary-color: #292929;
+            --border-color: #333;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .main-layout {
+            display: flex;
+            width: 100%;
+            max-width: 98%;
+            gap: 20px;
+            height: 90vh;
+        }
+
+        .content-area {
+            flex: 1;
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Sidebar das Estratégias */
+        .sidebar {
+            width: 380px;
+            flex-shrink: 0;
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            overflow-y: auto;
+        }
+
+        /* Sidebar Direita (Finanças) */
+        .sidebar-right {
+            width: 250px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 20px; /* Espaço entre Finanças e Analista */
+        }
+
+        .strategy-card {
+            background-color: var(--secondary-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            transition: 0.3s;
+        }
+
+        .strategy-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            display: block;
+            font-size: 1.1rem;
+        }
+
+        .strategy-status {
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+            padding: 5px 10px;
+            border-radius: 4px;
+            display: inline-block;
+            color: #000;
+            font-weight: bold;
+        }
+
+        .stats-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+            color: #aaa;
+        }
+
+        .win-count { color: #00ff88; }
+        .loss-count { color: #ff4444; }
+
+        /* Cores de Estado */
+        .status-idle { background-color: #444; color: #fff; }
+        .status-waiting { background-color: #ffd700; color: #000; box-shadow: 0 0 10px #ffd700; } /* Amarelo */
+        .status-active { background-color: #00ff88; color: #000; box-shadow: 0 0 10px #00ff88; } /* Verde */
+
+        h1 {
+            color: var(--accent-color);
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        /* Dropdown Estilizado */
+        .control-panel {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            justify-content: center;
+        }
+
+        select {
+            background-color: var(--secondary-color);
+            color: white;
+            padding: 10px 20px;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+            outline: none;
+            min-width: 200px;
+        }
+
+        select:hover {
+            border-color: var(--accent-color);
+        }
+
+        button {
+            background-color: var(--accent-color);
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+
+        button:hover {
+            opacity: 0.8;
+        }
+
+        /* Painel de Estratégias Seguras (25% da área) */
+        .safe-strategies-panel {
+            height: 25%;
+            min-height: 120px;
+            background-color: var(--secondary-color);
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            margin-bottom: 10px;
+            padding: 10px;
+            overflow-y: auto;
+        }
+        .safe-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .safe-tag {
+            background-color: #222;
+            border: 1px solid #00ff88;
+            color: #00ff88;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        /* Tabela de Histórico */
+        .history-container {
+            flex: 1; /* Ocupa o restante do espaço */
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        thead {
+            background-color: var(--secondary-color);
+            position: sticky;
+            top: 0;
+        }
+
+        th, td {
+            padding: 10px;
+            text-align: center;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            color: var(--accent-color);
+        }
+
+        tr:hover {
+            background-color: #2a2a2a;
+        }
+
+        /* Scrollbar customizada */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-color);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--secondary-color);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-color);
+        }
+
+        .status-bar {
+            margin-top: 10px;
+            font-size: 0.8rem;
+            color: #888;
+            text-align: right;
+        }
+
+        /* Placar Geral */
+        .scoreboard {
+            display: flex;
+            justify-content: center;
+            gap: 50px;
+            background-color: var(--secondary-color);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+        }
+        .score-item { text-align: center; }
+        .score-label { display: block; font-size: 0.8rem; color: #aaa; margin-bottom: 5px; letter-spacing: 1px; }
+        .score-value { font-size: 2rem; font-weight: bold; }
+        .score-value.win { color: #00ff88; }
+        .score-value.loss { color: #ff4444; }
+
+        /* Estilos do Gerente de Finanças */
+        .finance-card {
+            background-color: var(--secondary-color);
+            background-color: var(--card-bg); /* Fundo do card principal */
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            flex: 1; /* Ocupa 50% do espaço disponível */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        /* Estilos do Console da IA (reaproveitado do Analista) */
+        .analyst-card {
+            background-color: var(--card-bg);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            flex: 1; /* Ocupa o espaço restante na coluna */
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #444;
+            overflow: hidden;
+        }
+
+        .analyst-log {
+            flex: 1;
+            background-color: #111;
+            border: 1px solid #333;
+            border-radius: 5px;
+            padding: 10px;
+            font-size: 0.85rem;
+            color: #00ff88;
+            overflow-y: auto;
+            margin-top: 10px;
+            font-family: 'Courier New', Courier, monospace;
+            min-height: 0;
+        }
+
+        .balance-value {
+            font-size: 1.8rem;
+            color: var(--accent-color);
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .account-selector {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .account-btn {
+            background-color: #333;
+            color: #888;
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+
+        .account-btn.active {
+            background-color: var(--accent-color);
+            color: #000;
+            font-weight: bold;
+            box-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
+        }
+
+        /* Estilos da Bússola de Tendência */
+        .compass-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background-color: var(--secondary-color);
+            padding: 5px 15px;
+            border-radius: 5px;
+            border: 1px solid var(--border-color);
+        }
+        .compass-icon {
+            font-size: 1.5rem;
+            transition: transform 0.5s ease, color 0.3s;
+        }
+        .compass-text {
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+        .trend-up { color: #00ff88; transform: rotate(0deg); }
+        .trend-down { color: #ff4444; transform: rotate(180deg); }
+        .trend-flat { color: #aaa; transform: rotate(90deg); }
+
+        /* Modal de Configurações */
+        .modal {
+            display: none; 
+            position: fixed; 
+            z-index: 1000; 
+            left: 0; top: 0; 
+            width: 100%; height: 100%; 
+            background-color: rgba(0,0,0,0.8);
+        }
+        .modal-content {
+            background-color: var(--card-bg);
+            margin: 5% auto;
+            padding: 20px;
+            border: 1px solid var(--border-color);
+            width: 80%;
+            max-width: 900px;
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            height: 80vh;
+        }
+        .modal-header {
+            display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 20px;
+        }
+        .modal-body {
+            display: flex; gap: 20px; flex: 1; overflow: hidden;
+        }
+        .config-sidebar {
+            width: 250px; border-right: 1px solid var(--border-color); padding-right: 20px; overflow-y: auto;
+        }
+        .config-main {
+            flex: 1; padding-left: 20px; overflow-y: auto;
+        }
+        .config-item {
+            padding: 10px; cursor: pointer; border-radius: 5px; margin-bottom: 5px; display: flex; justify-content: space-between;
+        }
+        .config-item:hover, .config-item.active { background-color: var(--secondary-color); color: var(--accent-color); }
+        
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; color: #aaa; }
+        .form-group input[type="number"], .form-group input[type="text"] {
+            width: 100%; padding: 8px; background: #333; border: 1px solid #555; color: #fff; border-radius: 4px;
+        }
+        .form-group input[type="checkbox"] { transform: scale(1.5); margin-right: 10px; }
+        
+        .close-btn { color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close-btn:hover { color: #fff; }
+
+        .search-box {
+            width: 100%; padding: 8px; margin-bottom: 10px; background: #333; border: 1px solid #555; color: #fff; border-radius: 4px;
+        }
+        .btn-save { width: 100%; margin-top: 20px; }
+        
+        .gear-icon { font-size: 1.2rem; }
+
+        /* Toggle Switch (Botão Deslizante) */
+        .switch-container {
+            display: flex;
+            align-items: center;
+            margin-right: 15px;
+            background-color: var(--secondary-color);
+            padding: 5px 10px;
+            border-radius: 5px;
+            border: 1px solid var(--border-color);
+        }
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+            margin-right: 10px;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ff4444; /* Vermelho (Desligado) */
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px; width: 16px;
+            left: 4px; bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider { background-color: #00ff88; /* Verde (Ligado) */ }
+        input:checked + .slider:before { transform: translateX(26px); }
+        .toggle-label { font-weight: bold; font-size: 0.9rem; color: #ff4444; width: 30px; text-align: center; }
+
+        /* Botão de Backtest */
+        .btn-backtest {
+            background-color: #00aaff; color: white; border: none; padding: 5px 10px;
+            border-radius: 4px; cursor: pointer; font-size: 0.8rem; margin-left: 10px;
+        }
+        .btn-backtest:hover { background-color: #0088cc; }
+    </style>
+</head>
+<body>
+
+    <!-- Modal de Configurações -->
+    <div id="configModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Configurações do Robô</h2>
+                <span class="close-btn" onclick="fecharModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <!-- Sidebar: Lista de Estratégias -->
+                <div class="config-sidebar">
+                    <h3 style="color:var(--accent-color)">Geral</h3>
+                    <div class="config-item" onclick="mostrarConfigTendencia()">
+                        <span>Tendência (SMA)</span> <span>⚙️</span>
+                    </div>
+                    <hr style="border-color:#333; margin: 15px 0;">
+                    <h3 style="color:var(--accent-color)">Estratégias</h3>
+                    <input type="text" id="searchStrategy" class="search-box" placeholder="Buscar estratégia..." onkeyup="filtrarEstrategias()">
+                    <div id="listaEstrategiasConfig">
+                        <!-- Lista gerada via JS -->
+                    </div>
+                    <div style="margin-top: 20px; padding-top: 10px; border-top: 1px solid #333; text-align: center;">
+                        <button onclick="resetarTudo()" style="width:100%; background-color:#ff4444; color:white; border:none; padding:10px; border-radius:5px; cursor:pointer; font-weight:bold;">⚠️ Resetar Padrões</button>
+                    </div>
+                </div>
+
+                <!-- Main: Formulário -->
+                <div class="config-main" id="configFormArea">
+                    <div style="text-align:center; color:#777; margin-top:50px;">
+                        Selecione um item à esquerda para configurar.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-layout">
+        <!-- Nova Janela Esquerda: Gerente de Estratégias -->
+        <div class="sidebar" id="sidebarEstrategias">
+            <h2 style="text-align:center; color:var(--accent-color); margin-top:0;">Estratégias</h2>
+            <!-- Os balões serão inseridos aqui via JS -->
+        </div>
+
+        <!-- Área Principal -->
+        <div class="content-area">
+            <h1>Tela de Status</h1>
+        
+            <!-- Placar Geral da Sessão -->
+            <div class="scoreboard">
+                <div class="score-item">
+                    <span class="score-label">WINS</span>
+                    <span class="score-value win" id="placarWins">0</span>
+                </div>
+                <div class="score-item">
+                    <span class="score-label">LOSS</span>
+                    <span class="score-value loss" id="placarLoss">0</span>
+                </div>
+            </div>
+
+            <div class="control-panel">
+                <!-- Botão Deslizante de Trading -->
+                <div class="switch-container" title="Ativar/Desativar Entradas">
+                    <label class="switch">
+                        <input type="checkbox" id="tradingToggle" onchange="toggleTrading()">
+                        <span class="slider"></span>
+                    </label>
+                    <span id="tradingStatusText" class="toggle-label">OFF</span>
+                </div>
+
+                <select id="ativoSelect">
+                    <option value="" disabled selected>Carregando ativos OTC...</option>
+                </select>
+                <select id="tipoOpcaoSelect" onchange="alterarTipoOpcao()">
+                    <option value="BLITZ">Blitz (Turbo)</option>
+                    <option value="BINARY">Binária (Clássica)</option>
+                    <option value="DIGITAL">Digital</option>
+                </select>
+                <div class="compass-container" title="Tendência de Mercado (SMA 20)">
+                    <div id="compassIcon" class="compass-icon trend-flat">➤</div>
+                    <span id="compassText" class="compass-text">---</span>
+                </div>
+                <button onclick="abrirModal()" style="background-color:#444; color:#fff;">⚙️ Configurações</button>
+                <button onclick="iniciarMonitoramento()">Selecionar Ativo</button>
+            </div>
+
+            <!-- Painel de Estratégias Seguras (25%) -->
+            <div class="safe-strategies-panel">
+                <h3 style="margin-top:0; font-size:1rem; color:var(--accent-color); display:flex; align-items:center; gap:10px; justify-content: space-between;">
+                    <span>🛡️ Estratégias Habilitadas (Seguras)</span>
+                    <div style="display:flex; align-items:center; gap:5px; font-size:0.8rem; color:#aaa; font-weight:normal;">
+                        <span>Min. Assertividade:</span>
+                        <select id="assertividadeSelect" onchange="alterarAssertividade()" style="padding:2px; background:#333; color:#fff; border:1px solid #555; border-radius:4px; min-width:60px;">
+                            <option value="50">50%</option>
+                            <option value="55">55%</option>
+                            <option value="60">60%</option>
+                            <option value="65">65%</option>
+                            <option value="70">70%</option>
+                            <option value="75">75%</option>
+                            <option value="80">80%</option>
+                        </select>
+                    </div>
+                </h3>
+                <div id="safeStrategiesList" class="safe-list"></div>
+            </div>
+
+            <div class="history-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Horário</th>
+                            <th>Abertura</th>
+                            <th>Fechamento</th>
+                            <th>Min</th>
+                            <th>Max</th>
+                            <th>Volume</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabelaCorpo">
+                        <!-- Dados serão inseridos aqui via JS -->
+                    </tbody>
+                </table>
+            </div>
+            <div class="status-bar" id="statusMsg">Aguardando seleção...</div>
+        </div>
+
+        <!-- Nova Janela Direita: Gerente de Finanças -->
+        <div class="sidebar-right">
+            <div class="finance-card">
+                <h2 style="text-align:center; color:var(--accent-color); margin-top:0;">Finanças</h2>
+                <div>Saldo Atual</div>
+                <div class="balance-value" id="saldoDisplay">---</div>
+                
+                <div style="margin: 15px 0; border-top: 1px solid #333; padding-top: 10px;">
+                    <div style="font-size: 0.9rem; color: #aaa;">Lucro da Sessão: <span id="lucroDisplay" style="font-weight:bold;">---</span></div>
+                    <div style="font-size: 0.9rem; color: #aaa; margin-top:5px; display:flex; align-items:center; justify-content:center; gap:5px;">
+                        Valor Entrada: $ <input type="number" id="inputAposta" onchange="alterarValorEntrada()" style="width:70px; background:#333; color:#fff; border:1px solid #555; border-radius:4px; padding:4px; text-align:center;">
+                    </div>
+                </div>
+
+                <div class="account-selector">
+                    <button id="btnPractice" class="account-btn" onclick="trocarConta('PRACTICE')">Conta Treinamento</button>
+                    <button id="btnReal" class="account-btn" onclick="trocarConta('REAL')">Conta Real</button>
+                </div>
+            </div>
+
+            <!-- Console da IA -->
+            <div class="analyst-card">
+                <h2 style="color:#00aaff; margin:0;">Console da IA</h2>
+                <div style="display: flex; justify-content: space-around; text-align: center; margin-top: 10px; padding-bottom: 10px; border-bottom: 1px solid #333;">
+                    <div>
+                        <div style="font-size: 0.8rem; color: #aaa;">ACERTOS IA</div>
+                        <div id="iaAcertos" style="font-size: 1.5rem; color: #00ff88; font-weight: bold;">0</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.8rem; color: #aaa;">ERROS IA</div>
+                        <div id="iaErros" style="font-size: 1.5rem; color: #ff4444; font-weight: bold;">0</div>
+                    </div>
+                </div>
+                <div class="analyst-log" id="iaLog">
+                    > Aguardando decisões da IA...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let estadosAnteriores = {}; // Para rastrear mudanças de status das estratégias
+
+        // Carregar ativos ao iniciar
+        async function carregarAtivos() {
+            try {
+                const response = await fetch('/api/ativos-otc');
+                const ativos = await response.json();
+                
+                const select = document.getElementById('ativoSelect');
+                select.innerHTML = '<option value="" disabled selected>Escolha um ativo OTC</option>';
+                
+                ativos.forEach(ativo => {
+                    const option = document.createElement('option');
+                    option.value = ativo;
+                    option.textContent = ativo;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error("Erro ao carregar ativos:", error);
+                document.getElementById('ativoSelect').innerHTML = '<option>Erro ao carregar</option>';
+            }
+        }
+
+        // Gerenciar Tipo de Opção (Blitz/Digital)
+        async function carregarTipoOpcao() {
+            try {
+                const response = await fetch('/api/tipo-opcao');
+                const dados = await response.json();
+                document.getElementById('tipoOpcaoSelect').value = dados.tipo;
+            } catch (error) {
+                console.error("Erro ao carregar tipo de opção:", error);
+            }
+        }
+
+        async function alterarTipoOpcao() {
+            const tipo = document.getElementById('tipoOpcaoSelect').value;
+            await fetch('/api/tipo-opcao', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({tipo: tipo})
+            });
+        }
+
+        // Gerenciar Assertividade Mínima
+        async function carregarAssertividade() {
+            try {
+                const response = await fetch('/api/config/assertividade');
+                const data = await response.json();
+                document.getElementById('assertividadeSelect').value = data.valor;
+            } catch (error) {
+                console.error("Erro ao carregar assertividade:", error);
+            }
+        }
+
+        async function alterarAssertividade() {
+            const valor = document.getElementById('assertividadeSelect').value;
+            await fetch('/api/config/assertividade', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({valor: valor})
+            });
+            console.log("Assertividade mínima alterada para: " + valor + "%");
+            atualizarEstrategias(); // Atualiza a lista visualmente
+        }
+
+        // Iniciar monitoramento do ativo escolhido
+        async function iniciarMonitoramento() {
+            const ativo = document.getElementById('ativoSelect').value;
+            if (!ativo) return alert("Selecione um ativo!");
+
+            document.getElementById('statusMsg').innerText = `Carregando histórico de ${ativo}...`;
+
+            const response = await fetch('/api/selecionar-ativo', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ativo: ativo})
+            });
+            
+            const result = await response.json();
+            document.getElementById('statusMsg').innerText = result.mensagem;
+            
+            // Começa a atualizar a tabela periodicamente
+            gerenciarAtualizacaoVelas(); // Inicia o loop inteligente das velas
+            atualizarEstrategias();
+            atualizarTendencia();
+            atualizarPlacarGeral();
+            setInterval(atualizarEstrategias, 2000); // Atualiza cards de estratégia
+            setInterval(atualizarTendencia, 2000);
+            setInterval(atualizarPlacarGeral, 2000);
+            setInterval(verificarMensagensIA, 2000); // Inicia o log da IA
+        }
+
+        // Buscar dados do histórico e renderizar
+        async function atualizarTabela() {
+            try {
+                const response = await fetch('/api/historico');
+                const dados = await response.json();
+                
+                const tbody = document.getElementById('tabelaCorpo');
+                tbody.innerHTML = ''; // Limpa tabela (pode ser otimizado para não redesenhar tudo)
+
+                // Inverte para mostrar o mais recente no topo
+                [...dados].reverse().forEach(vela => {
+                    const tr = document.createElement('tr');
+                    
+                    // Define cor baseada se subiu (verde) ou desceu (vermelho)
+                    const cor = vela.close >= vela.open ? '#00ff88' : '#ff4444';
+                    
+                    tr.innerHTML = `
+                        <td>${vela.horario_formatado}</td>
+                        <td>${vela.open}</td>
+                        <td style="color: ${cor}; font-weight: bold;">${vela.close}</td>
+                        <td>${vela.min}</td>
+                        <td>${vela.max}</td>
+                        <td>${vela.volume}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (error) {
+                console.error("Erro ao atualizar tabela:", error);
+            }
+        }
+
+        // Loop de Atualização da Tabela
+        function gerenciarAtualizacaoVelas() {
+            // Evita duplicidade se clicar no botão várias vezes
+            if (window.loopVelasId) clearTimeout(window.loopVelasId);
+            
+            atualizarTabela();
+            
+            // Atualiza constantemente a cada 1 segundo para garantir sincronia visual
+            // Como roda localmente, isso é muito leve e não trava o PC
+            window.loopVelasId = setTimeout(gerenciarAtualizacaoVelas, 1000);
+        }
+
+        // Buscar e renderizar Estratégias (Balões)
+        async function atualizarEstrategias() {
+            try {
+                const response = await fetch('/api/status-estrategias');
+                const estrategias = await response.json();
+                
+                const sidebar = document.getElementById('sidebarEstrategias');
+                const safeList = document.getElementById('safeStrategiesList');
+                // Mantemos o título
+                sidebar.innerHTML = '<h2 style="text-align:center; color:var(--accent-color); margin-top:0;">Estratégias</h2>';
+
+                // Limpa lista de seguras
+                safeList.innerHTML = '';
+                let temSegura = false;
+
+                estrategias.forEach(dados => {
+                    const key = dados.id; // O ID agora vem dentro do objeto
+                    // --- Lógica de Atualização de Saldo baseada em Eventos ---
+                    const estadoAnterior = estadosAnteriores[key] || 'idle';
+                    
+                    // Se mudou para 'active' (fez uma entrada/compra)
+                    if (dados.status === 'active' && estadoAnterior !== 'active') {
+                        console.log(`Entrada detectada em ${dados.nome}. Atualizando saldo...`);
+                        atualizarSaldo(); // Atualiza agora (compra)
+                        
+                        // Agenda atualização para daqui a 62 segundos (resultado)
+                        setTimeout(() => {
+                            console.log("Validando resultado da operação...");
+                            atualizarSaldo();
+                        }, 62000);
+                    }
+                    
+                    // Salva o estado atual para a próxima verificação
+                    estadosAnteriores[key] = dados.status;
+                    // ---------------------------------------------------------
+
+                    const div = document.createElement('div');
+                    div.className = 'strategy-card';
+                    
+                    // Define texto e classe baseada no status
+                    let statusText = "Aguardando Padrão";
+                    let statusClass = "status-idle";
+                    
+                    if (dados.status === 'waiting') {
+                        statusText = "Aguardando Confirmação";
+                        statusClass = "status-waiting";
+                    } else if (dados.status === 'active') {
+                        statusText = "OPERANDO (Venda)";
+                        statusClass = "status-active";
+                    }
+
+                    // Ícone de Fantasma se estiver no Modo Fantasma
+                    const ghostIcon = dados.is_ghost ? '<span title="Modo Fantasma (Baixa Assertividade)" style="font-size:1.2rem;">👻</span>' : '';
+
+                    div.innerHTML = `
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span class="strategy-title" style="margin:0;">${dados.nome}</span>
+                            ${ghostIcon}
+                        </div>
+                        <span class="strategy-status ${statusClass}">${statusText}</span>
+                        <div class="stats-row">
+                            <span class="win-count">Wins: ${dados.wins}</span>
+                            <span class="loss-count">Loss: ${dados.loss}</span>
+                        </div>
+                    `;
+                    sidebar.appendChild(div);
+
+                    // Adiciona à lista de Seguras se NÃO for fantasma
+                    if (!dados.is_ghost) {
+                        temSegura = true;
+                        const tag = document.createElement('div');
+                        tag.className = 'safe-tag';
+                        // Calcula winrate para exibir
+                        const total = (dados.total_wins || 0) + (dados.total_loss || 0);
+                        const wr = total > 0 ? ((dados.total_wins / total) * 100).toFixed(0) : 0;
+                        
+                        tag.innerHTML = `<span>${dados.nome}</span> <span style="background:#000; padding:2px 5px; border-radius:10px; font-size:0.7rem;">${wr}%</span>`;
+                        safeList.appendChild(tag);
+                    }
+                });
+
+                if (!temSegura) {
+                    safeList.innerHTML = '<span style="color:#666; font-style:italic; padding:10px;">Nenhuma estratégia segura identificada ainda. O Analista está coletando dados...</span>';
+                }
+            } catch (error) {
+                console.error("Erro ao atualizar estratégias:", error);
+            }
+        }
+
+        // Atualizar Placar Geral (Wins/Loss da Sessão)
+        async function atualizarPlacarGeral() {
+            try {
+                const response = await fetch('/api/placar-geral');
+                const dados = await response.json();
+                document.getElementById('placarWins').innerText = dados.wins;
+                document.getElementById('placarLoss').innerText = dados.loss;
+                document.getElementById('iaAcertos').innerText = dados.ia_acertos_bloqueio;
+                document.getElementById('iaErros').innerText = dados.ia_erros_bloqueio;
+            } catch (error) {
+                console.error("Erro ao atualizar placar geral:", error);
+            }
+        }
+
+        // Atualizar Bússola de Tendência
+        async function atualizarTendencia() {
+            try {
+                const response = await fetch('/api/tendencia');
+                const dados = await response.json();
+                
+                const icon = document.getElementById('compassIcon');
+                const text = document.getElementById('compassText');
+                
+                // Reseta classes
+                icon.className = 'compass-icon';
+                
+                if (dados.tendencia === 'ALTA') {
+                    icon.classList.add('trend-up');
+                    text.innerText = "ALTA";
+                } else if (dados.tendencia === 'BAIXA') {
+                    icon.classList.add('trend-down');
+                    text.innerText = "BAIXA";
+                } else {
+                    icon.classList.add('trend-flat');
+                    text.innerText = "LATERAL";
+                }
+            } catch (error) {
+                console.error("Erro ao atualizar tendência:", error);
+            }
+        }
+
+        // Gerente de Finanças
+        async function atualizarSaldo() {
+            try {
+                const response = await fetch('/api/saldo');
+                const dados = await response.json();
+                
+                if (dados.erro) return;
+
+                // Atualiza valor
+                document.getElementById('saldoDisplay').innerText = 
+                    dados.saldo.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+
+                // Atualiza Lucro da Sessão
+                const elLucro = document.getElementById('lucroDisplay');
+                elLucro.innerText = dados.lucro.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+                elLucro.style.color = dados.lucro >= 0 ? '#00ff88' : '#ff4444'; // Verde se positivo, Vermelho se negativo
+
+                // Atualiza Valor da Aposta
+                document.getElementById('inputAposta').value = dados.valor_aposta;
+
+                // Atualiza botões
+                const btnPractice = document.getElementById('btnPractice');
+                const btnReal = document.getElementById('btnReal');
+
+                if (dados.modo === 'PRACTICE') {
+                    btnPractice.classList.add('active');
+                    btnReal.classList.remove('active');
+                } else {
+                    btnReal.classList.add('active');
+                    btnPractice.classList.remove('active');
+                }
+            } catch (error) {
+                console.error("Erro ao atualizar saldo:", error);
+            }
+        }
+
+        async function trocarConta(tipo) {
+            await fetch('/api/alterar-conta', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({tipo: tipo})
+            });
+            atualizarSaldo(); // Atualiza imediatamente após a troca
+        }
+
+        async function alterarValorEntrada() {
+            const input = document.getElementById('inputAposta');
+            const valor = input.value;
+            
+            const response = await fetch('/api/definir-valor', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({valor: valor})
+            });
+            
+            const dados = await response.json();
+            if (dados.erro) {
+                alert(dados.erro);
+                atualizarSaldo(); // Reverte para o valor salvo no servidor
+            }
+        }
+
+        // --- LÓGICA DO MODAL DE CONFIGURAÇÃO ---
+        let estrategiasCache = {};
+
+        function abrirModal() {
+            document.getElementById('configModal').style.display = 'block';
+            carregarListaEstrategiasConfig();
+        }
+
+        function fecharModal() {
+            document.getElementById('configModal').style.display = 'none';
+        }
+
+        async function carregarListaEstrategiasConfig() {
+            const response = await fetch('/api/status-estrategias');
+            estrategiasCache = await response.json();
+            renderizarListaEstrategias(estrategiasCache);
+        }
+
+        function renderizarListaEstrategias(lista) {
+            const container = document.getElementById('listaEstrategiasConfig');
+            container.innerHTML = '';
+            
+            // Ordena alfabeticamente
+            const sortedKeys = Object.keys(lista).sort((a, b) => lista[a].nome.localeCompare(lista[b].nome));
+
+            sortedKeys.forEach(key => {
+                const st = lista[key];
+                const div = document.createElement('div');
+                div.className = 'config-item';
+                div.innerHTML = `<span>${st.nome}</span> <span class="gear-icon">⚙️</span>`;
+                div.onclick = () => mostrarConfigEstrategia(key, st);
+                div.dataset.nome = st.nome.toLowerCase(); // Para busca
+                container.appendChild(div);
+            });
+        }
+
+        function filtrarEstrategias() {
+            const termo = document.getElementById('searchStrategy').value.toLowerCase();
+            const itens = document.querySelectorAll('#listaEstrategiasConfig .config-item');
+            itens.forEach(item => {
+                const nome = item.dataset.nome;
+                item.style.display = nome.includes(termo) ? 'flex' : 'none';
+            });
+        }
+
+        async function mostrarConfigTendencia() {
+            const response = await fetch('/api/config/tendencia');
+            const dados = await response.json();
+            
+            const area = document.getElementById('configFormArea');
+            area.innerHTML = `
+                <h2>Configuração de Tendência</h2>
+                <p style="color:#aaa; font-size:0.9rem;">Define como o robô identifica a direção do mercado (SMA).</p>
+                
+                <div class="form-group">
+                    <label>Período da Média Móvel (Velas)</label>
+                    <input type="number" id="inputPeriodo" value="${dados.periodo}">
+                    <small style="color:#666">Curta: 10-15 | Média: 20-50 | Longa: 100+</small>
+                </div>
+                
+                <button class="btn-save" onclick="salvarTendencia()">Salvar Configuração</button>
+            `;
+        }
+
+        async function salvarTendencia() {
+            const periodo = document.getElementById('inputPeriodo').value;
+            await fetch('/api/config/tendencia', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({periodo: periodo})
+            });
+            alert("Configuração de tendência salva!");
+            atualizarTendencia(); // Atualiza a bússola na hora
+        }
+
+        function mostrarConfigEstrategia(key, dados) {
+            const cfg = dados.config || {min_body: 1.0, max_body: 4.0, max_wick: 0.2, use_trend: false};
+            
+            // Cálculos do Histórico Vitalício
+            const totalWins = dados.total_wins || 0;
+            const totalLoss = dados.total_loss || 0;
+            const total = totalWins + totalLoss;
+            const winRate = total > 0 ? ((totalWins / total) * 100).toFixed(1) : 0;
+            
+            const area = document.getElementById('configFormArea');
+            area.innerHTML = `
+                <h2>${dados.nome}</h2>
+                
+                <!-- Histórico Vitalício -->
+                <div style="background-color:#222; padding:15px; border-radius:8px; margin-bottom:20px; border:1px solid #444;">
+                    <h3 style="margin-top:0; color:var(--accent-color); font-size:1rem;">Histórico Vitalício</h3>
+                    <div style="display:flex; justify-content:space-around; text-align:center;">
+                        <div>
+                            <div style="font-size:1.2rem; color:#00ff88; font-weight:bold;">${totalWins}</div>
+                            <div style="font-size:0.8rem; color:#aaa;">Wins</div>
+                        </div>
+                        <div>
+                            <div style="font-size:1.2rem; color:#ff4444; font-weight:bold;">${totalLoss}</div>
+                            <div style="font-size:0.8rem; color:#aaa;">Loss</div>
+                        </div>
+                        <div>
+                            <div style="font-size:1.2rem; color:#fff; font-weight:bold;">${winRate}%</div>
+                            <div style="font-size:0.8rem; color:#aaa;">Assertividade</div>
+                        </div>
+                    </div>
+                </div>
+
+                <p style="color:#aaa; font-size:0.9rem;">Ajuste fino dos parâmetros desta estratégia.</p>
+                
+                <div class="form-group">
+                    <label>Expiração (Blitz: 30s-5m | Digital: 1m+)</label>
+                    <select id="cfgExpiration" style="width:100%; padding:8px; background:#333; border:1px solid #555; color:#fff; border-radius:4px;">
+                        <option value="0.5" ${cfg.expiration == 0.5 ? 'selected' : ''}>30 Segundos (Blitz)</option>
+                        <option value="0.75" ${cfg.expiration == 0.75 ? 'selected' : ''}>45 Segundos (Blitz)</option>
+                        <option value="1" ${cfg.expiration == 1 ? 'selected' : ''}>1 Minuto</option>
+                        <option value="2" ${cfg.expiration == 2 ? 'selected' : ''}>2 Minutos</option>
+                        <option value="3" ${cfg.expiration == 3 ? 'selected' : ''}>3 Minutos</option>
+                        <option value="5" ${cfg.expiration == 5 ? 'selected' : ''}>5 Minutos</option>
+                        <option value="15" ${cfg.expiration == 15 ? 'selected' : ''}>15 Minutos (Digital)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Corpo Mínimo (x Média)</label>
+                    <input type="number" step="0.1" id="cfgMinBody" value="${cfg.min_body}">
+                </div>
+                <div class="form-group">
+                    <label>Corpo Máximo (x Média - Exaustão)</label>
+                    <input type="number" step="0.1" id="cfgMaxBody" value="${cfg.max_body}">
+                </div>
+                <div class="form-group">
+                    <label>Pavio Máximo (% do Corpo)</label>
+                    <input type="number" step="0.05" id="cfgMaxWick" value="${cfg.max_wick}">
+                </div>
+                <div class="form-group" style="display:flex; align-items:center; margin-top:20px;">
+                    <input type="checkbox" id="cfgUseTrend" ${cfg.use_trend ? 'checked' : ''}>
+                    <label style="margin:0; color:#fff; cursor:pointer;" for="cfgUseTrend">Usar Filtro de Tendência</label>
+                </div>
+                
+                <button class="btn-save" onclick="salvarEstrategia('${key}')">Salvar Alterações</button>
+                <button class="btn-save" style="background-color: #00aaff; margin-top: 10px;" onclick="executarBacktestEstrategia('${key}')">⚡ Rodar Backtest Nesta Estratégia</button>
+            `;
+        }
+
+        async function salvarEstrategia(key) {
+            const config = {
+                expiration: parseFloat(document.getElementById('cfgExpiration').value),
+                min_body: parseFloat(document.getElementById('cfgMinBody').value),
+                max_body: parseFloat(document.getElementById('cfgMaxBody').value),
+                max_wick: parseFloat(document.getElementById('cfgMaxWick').value),
+                "use_trend": document.getElementById('cfgUseTrend').checked,
+            };
+
+            await fetch('/api/config/estrategia', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({nome: key, config: config})
+            });
+            alert(`Configurações de ${key} salvas!`);
+            carregarListaEstrategiasConfig(); // Recarrega para atualizar cache local
+        }
+
+        // --- CONTROLE DE TRADING (ON/OFF) ---
+        async function toggleTrading() {
+            const checkbox = document.getElementById('tradingToggle');
+            const statusText = document.getElementById('tradingStatusText');
+            
+            const response = await fetch('/api/toggle-trading', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({estado: checkbox.checked})
+            });
+            const data = await response.json();
+            atualizarVisualToggle(data.enabled);
+        }
+
+        async function carregarStatusTrading() {
+            const response = await fetch('/api/trading-status');
+            const data = await response.json();
+            document.getElementById('tradingToggle').checked = data.enabled;
+            atualizarVisualToggle(data.enabled);
+        }
+
+        function atualizarVisualToggle(enabled) {
+            const statusText = document.getElementById('tradingStatusText');
+            if (enabled) {
+                statusText.innerText = "ON";
+                statusText.style.color = "#00ff88";
+            } else {
+                statusText.innerText = "OFF";
+                statusText.style.color = "#ff4444";
+            }
+        }
+
+        // --- CONTROLE DO ANALISTA (ON/OFF) ---
+        async function toggleAnalista() {
+            const checkbox = document.getElementById('analistaToggle');
+            const response = await fetch('/api/toggle-analista', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({estado: checkbox.checked})
+            });
+            const data = await response.json();
+            // Opcional: Feedback visual extra se necessário
+        }
+
+        async function carregarStatusAnalista() {
+            // Por padrão assumimos true, mas idealmente criaríamos um endpoint de status específico
+            // Como o estado reseta ao reiniciar o bot, começamos como true (checked)
+            document.getElementById('analistaToggle').checked = true;
+        }
+
+        // --- SISTEMA DE VOZ E ANALISTA ---
+        function falarTexto(texto) {
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(texto);
+                utterance.lang = 'pt-BR'; // Define idioma para Português
+                utterance.rate = 1.2; // Um pouco mais rápido
+                window.speechSynthesis.speak(utterance);
+            } else {
+                console.log("Navegador não suporta TTS.");
+            }
+        }
+
+        function testarVoz() {
+            falarTexto("O sistema de áudio do analista está operacional.");
+        }
+
+        function logAnalista(msg) {
+            const log = document.getElementById('analystLog');
+            const time = new Date().toLocaleTimeString();
+            // Adiciona a nova mensagem no TOPO (afterbegin) em vez de no final
+            log.insertAdjacentHTML('afterbegin', `<div><span style="color:#555">[${time}]</span> ${msg}</div>`);
+        }
+
+        async function verificarMensagensAnalista() {
+            try {
+                const response = await fetch('/api/analista/mensagens');
+                const mensagens = await response.json();
+                
+                if (mensagens && mensagens.length > 0) {
+                    mensagens.forEach(msg => {
+                        logAnalista(msg);
+                        falarTexto(msg);
+                    });
+                    
+                    // Feedback visual
+                    const status = document.getElementById('analystStatus');
+                    status.style.color = '#00ff88';
+                    status.innerText = "Ajustando parâmetros...";
+                    setTimeout(() => { status.style.color = '#aaa'; status.innerText = "Monitorando desempenho..."; }, 3000);
+                }
+            } catch (error) {
+                console.error("Erro no analista:", error);
+            }
+        }
+
+        async function executarBacktest() {
+            const btn = document.querySelector('.btn-backtest');
+            const status = document.getElementById('analystStatus');
+            
+            btn.disabled = true;
+            btn.innerText = "Rodando...";
+            status.innerText = "Analisando histórico de velas...";
+            status.style.color = "#00aaff";
+
+            try {
+                const response = await fetch('/api/analista/backtest', { 
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({})
+                });
+                const data = await response.json();
+                
+                if (data.status === 'ok') {
+                    logAnalista(`✅ Backtest Concluído! ${data.ajustes.length} estratégias otimizadas.`);
+                    falarTexto("Backtest concluído. Estratégias otimizadas com sucesso.");
+                } else {
+                    logAnalista(`❌ Erro no Backtest: ${data.erro}`);
+                }
+            } catch (error) {
+                console.error(error);
+                logAnalista("❌ Erro de conexão no Backtest.");
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "⚡ Backtest (Histórico)";
+                status.innerText = "Monitorando desempenho...";
+                status.style.color = "#aaa";
+            }
+        }
+
+        async function executarBacktestEstrategia(nomeEstrategia) {
+            const btn = event.target; // Pega o botão clicado
+            const textoOriginal = btn.innerText;
+            
+            btn.disabled = true;
+            btn.innerText = "Rodando Simulação...";
+            
+            try {
+                const response = await fetch('/api/analista/backtest', { 
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ strategy: nomeEstrategia })
+                });
+                const data = await response.json();
+                
+                if (data.status === 'ok') {
+                    alert(`${data.ajustes.length > 0 ? data.ajustes[0] : "Nenhum ajuste melhor encontrado (Config atual já é a melhor)."}`);
+                    mostrarConfigEstrategia(nomeEstrategia, estrategiasCache[nomeEstrategia]); // Recarrega para mostrar novos valores se houver
+                } else {
+                    alert(`Erro: ${data.erro}`);
+                }
+            } catch (error) {
+                console.error(error);
+                alert("Erro de conexão ao rodar backtest.");
+            } finally {
+                btn.disabled = false;
+                btn.innerText = textoOriginal;
+            }
+        }
+
+        async function resetarTudo() {
+            if(!confirm("⚠️ ATENÇÃO: Isso irá apagar todo o aprendizado do Analista e reverter todas as configurações para o padrão de fábrica.\n\nDeseja continuar?")) return;
+            
+            await fetch('/api/config/resetar', { method: 'POST' });
+            alert("Sistema resetado com sucesso!");
+            fecharModal();
+            location.reload(); // Recarrega a página para atualizar os placares zerados
+        }
+
+        // Fecha modal se clicar fora
+        window.onclick = function(event) {
+            if (event.target == document.getElementById('configModal')) {
+                fecharModal();
+            }
+        }
+
+        // Inicializa
+        carregarAtivos();
+        carregarTipoOpcao();
+        carregarAssertividade();
+        carregarStatusTrading();
+        // Primeira carga
+        setTimeout(atualizarSaldo, 1000);
+        // Atualização periódica do saldo a cada 3 segundos para manter sincronizado
+        setInterval(atualizarSaldo, 3000);
+    </script>
+</body>
+</html>

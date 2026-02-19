@@ -1,0 +1,6 @@
+Flask
+pywebview
+iqoptionapi
+groq
+pandas
+scikit-learn

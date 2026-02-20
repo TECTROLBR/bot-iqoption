@@ -479,9 +479,12 @@ class GerenteEstrategia:
         ganhos = 0
         perdas = 0
         
-        # Calcula média inicial
-        for i in range(-periodo, 0):
-            diff = historico[i]['close'] - historico[i]['open']
+        # CORREÇÃO: O RSI deve usar a variação entre fechamentos (Close - PrevClose)
+        # Pega as velas necessárias (periodo + 1 para calcular variações)
+        fatia = historico[-(periodo+1):]
+        
+        for i in range(1, len(fatia)):
+            diff = fatia[i]['close'] - fatia[i-1]['close']
             if diff > 0: ganhos += diff
             else: perdas += abs(diff)
             

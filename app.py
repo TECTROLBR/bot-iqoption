@@ -107,7 +107,8 @@ def loop_checagem_resultados():
                         resultado_real = "WIN" if win else "LOSS"
                         # Salva telemetria rica para a Aluna estudar
                         terreno_op = ordem['contexto_ml'].get('terreno', 'DESCONHECIDO')
-                        ia_aluna.registrar_telemetria(ordem['contexto_ml'], ordem['contexto_ml']['decisao_groq'], resultado_real, terreno_op)
+                        contexto_tecnico_op = ordem.get('contexto_tecnico', {})
+                        ia_aluna.registrar_telemetria(ordem['contexto_ml'], contexto_tecnico_op, ordem['contexto_ml']['decisao_groq'], resultado_real, terreno_op)
                         
                     ordens_em_andamento.remove(ordem)
             except Exception as e:
@@ -173,12 +174,12 @@ def loop_atualizacao_velas():
                                         score_ia['acertos_bloqueio'] += 1
                                         ia_brain.log_pensamento(f"✅ Validação: Bloqueio de CALL correto. Preço caiu (Loss evitado).")
                                         consecutive_errors = 0 # Reset: IA acertou
-                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, "BLOCK", "LOSS", contexto_ml_bloqueio.get('terreno'))
+                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "LOSS", contexto_ml_bloqueio.get('terreno'))
                                     elif fechamento_atual > entrada:
                                         score_ia['erros_bloqueio'] += 1
                                         ia_brain.log_pensamento(f"❌ Validação: Bloqueio de CALL incorreto. Preço subiu (Win perdido).")
                                         consecutive_errors += 1 # Erro: IA foi medrosa
-                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, "BLOCK", "WIN", contexto_ml_bloqueio.get('terreno'))
+                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "WIN", contexto_ml_bloqueio.get('terreno'))
                                 
                                 # Lógica: Se bloqueou PUT, torcemos para subir (Loss evitado). Se cair, IA errou.
                                 elif sinal_bloqueado == "PUT":
@@ -186,12 +187,12 @@ def loop_atualizacao_velas():
                                         score_ia['acertos_bloqueio'] += 1
                                         ia_brain.log_pensamento(f"✅ Validação: Bloqueio de PUT correto. Preço subiu (Loss evitado).")
                                         consecutive_errors = 0 # Reset: IA acertou
-                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, "BLOCK", "LOSS", contexto_ml_bloqueio.get('terreno'))
+                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "LOSS", contexto_ml_bloqueio.get('terreno'))
                                     elif fechamento_atual < entrada:
                                         score_ia['erros_bloqueio'] += 1
                                         ia_brain.log_pensamento(f"❌ Validação: Bloqueio de PUT incorreto. Preço caiu (Win perdido).")
                                         consecutive_errors += 1 # Erro: IA foi medrosa
-                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, "BLOCK", "WIN", contexto_ml_bloqueio.get('terreno'))
+                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "WIN", contexto_ml_bloqueio.get('terreno'))
                             
                             bloqueios_pendentes = [] # Limpa a fila após validar
 
@@ -202,7 +203,7 @@ def loop_atualizacao_velas():
                         for res in resultados_finalizados:
                             if 'contexto_ml' in res and res['contexto_ml']:
                                 terreno_sim = res['contexto_ml'].get('terreno', 'DESCONHECIDO')
-                                ia_aluna.registrar_telemetria(res['contexto_ml'], "PROCEED", res['resultado'], terreno_sim)
+                                ia_aluna.registrar_telemetria(res['contexto_ml'], contexto_atual, "PROCEED", res['resultado'], terreno_sim)
 
                         resultado_op = gerente_financas.autorizar_operacao(lista_sinais)
                         # Se houver algum sinal detectado, processa cada um individualmente
@@ -238,23 +239,28 @@ def loop_atualizacao_velas():
                             print(f"📝 Nota da Aluna para o Professor: {ia_aluna.regra_atual}")
 
                             # --- NOVA VALIDAÇÃO COM GROQ AI ---
-                            parecer_ia = ia_brain.validar_sinal(
+                            parecer_obj = ia_brain.validar_sinal(
                                 sinal=sinal,
                                 historico_completo=historico_analise,
                                 contexto_tecnico=contexto_atual,
                                 nota_aluna=ia_aluna.regra_atual,
                                 terreno=terreno_atual
                             )
+                            parecer_ia = parecer_obj.get("decision", "BLOCK")
                             
                             contexto_ml_atual["decisao_groq"] = parecer_ia
 
                             # LÓGICA DE DECISÃO FINAL (Híbrida)
-                            # Se a Groq bloquear, mas a Aluna tiver MUITA certeza (>80%), podemos arriscar (opcional)
-                            # Por enquanto, mantemos conservador: Se Groq bloquear, bloqueia.
-                            # Mas se Groq der erro, podemos usar a Aluna como backup.
                             
                             if parecer_ia == "BLOCK":
-                                print(f"🧠 IA Groq BLOQUEOU a operação de {sinal}. Motivo: Risco de ir contra o fluxo/rompimento.")
+                                source = parecer_obj.get("source", "UNKNOWN")
+                                reason = parecer_obj.get("reason", "Risco não especificado.")
+
+                                if source == "ALUNA_FILTER":
+                                    print(f"🛡️ Aluna BLOQUEOU a operação de {sinal}. Motivo: {reason}.")
+                                else: # GROQ_API, API_ERROR, etc.
+                                    print(f"🧠 Groq BLOQUEOU a operação de {sinal}. Motivo: {reason}.")
+
                                 # Registra para validação na próxima vela (Shadow Tracking)
                                 bloqueios_pendentes.append({
                                     "sinal": sinal,
@@ -284,7 +290,8 @@ def loop_atualizacao_velas():
                                             "id": order_id,
                                             "estrategias": estrategias_ativas,
                                             "tipo": tipo_opcao,
-                                            "contexto_ml": contexto_ml_atual # Anexa contexto para salvar no final
+                                            "contexto_ml": contexto_ml_atual, # Anexa contexto para salvar no final
+                                            "contexto_tecnico": contexto_atual # Anexa contexto TÉCNICO para salvar no final
                                         })
                                         # Atualiza status: Vencedoras -> Active, Perdedoras -> Idle
                                         gerente_estrategia.processar_resultado_votacao(estrategias_ativas)

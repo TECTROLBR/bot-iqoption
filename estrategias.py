@@ -596,7 +596,9 @@ class GerenteEstrategia:
             "vol_medio": vol_med,
             "bb": bb,
             "tendencia_m5": trend_m5,
-            "atr": atr
+            "atr": atr,
+            "close": historico[-1]['close'],
+            "volume": historico[-1]['volume']
         }
 
     def validar_filtros(self, vela, config, contexto, tendencia_requerida=None, tendencia_especifica=None):

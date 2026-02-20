@@ -1,6 +1,7 @@
 import time
 import threading
 import os
+import logging
 import webview
 from collections import deque
 from flask import Flask, render_template, jsonify, request
@@ -12,6 +13,9 @@ from financas import GerenteFinancas
 
 app = Flask(__name__)
 app.json.sort_keys = False # Garante que o JSON respeite a ordem de prioridade (Flask 3.x)
+
+# Desativa logs de requisição do Flask (Werkzeug) para limpar o console
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 # --- CONFIGURAÇÕES ---
 # IMPORTANTE: Substitua pelas suas credenciais ou use variáveis de ambiente
@@ -109,6 +113,10 @@ def loop_checagem_resultados():
                         terreno_op = ordem['contexto_ml'].get('terreno', 'DESCONHECIDO')
                         contexto_tecnico_op = ordem.get('contexto_tecnico', {})
                         ia_aluna.registrar_telemetria(ordem['contexto_ml'], contexto_tecnico_op, ordem['contexto_ml']['decisao_groq'], resultado_real, terreno_op)
+
+                        # --- AUTO-REFLEXÃO (PROCEED_LOSS) ---
+                        if not win:
+                            threading.Thread(target=ia_aluna.refletir_sobre_erro, args=("PROCEED_LOSS", ordem.get('sinal', 'UNKNOWN'), contexto_tecnico_op, list(historico_velas)[-15:])).start()
                         
                     ordens_em_andamento.remove(ordem)
             except Exception as e:
@@ -180,6 +188,8 @@ def loop_atualizacao_velas():
                                         ia_brain.log_pensamento(f"❌ Validação: Bloqueio de CALL incorreto. Preço subiu (Win perdido).")
                                         consecutive_errors += 1 # Erro: IA foi medrosa
                                         if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "WIN", contexto_ml_bloqueio.get('terreno'))
+                                        # Aciona Auto-Reflexão (MISSED_WIN)
+                                        threading.Thread(target=ia_aluna.refletir_sobre_erro, args=("MISSED_WIN", "CALL", contexto_do_bloqueio, list(historico_velas)[-15:])).start()
                                 
                                 # Lógica: Se bloqueou PUT, torcemos para subir (Loss evitado). Se cair, IA errou.
                                 elif sinal_bloqueado == "PUT":
@@ -193,6 +203,8 @@ def loop_atualizacao_velas():
                                         ia_brain.log_pensamento(f"❌ Validação: Bloqueio de PUT incorreto. Preço caiu (Win perdido).")
                                         consecutive_errors += 1 # Erro: IA foi medrosa
                                         if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "WIN", contexto_ml_bloqueio.get('terreno'))
+                                        # Aciona Auto-Reflexão (MISSED_WIN)
+                                        threading.Thread(target=ia_aluna.refletir_sobre_erro, args=("MISSED_WIN", "PUT", contexto_do_bloqueio, list(historico_velas)[-15:])).start()
                             
                             bloqueios_pendentes = [] # Limpa a fila após validar
 
@@ -244,7 +256,8 @@ def loop_atualizacao_velas():
                                 historico_completo=historico_analise,
                                 contexto_tecnico=contexto_atual,
                                 nota_aluna=ia_aluna.regra_atual,
-                                terreno=terreno_atual
+                                terreno=terreno_atual,
+                                regras_dinamicas=ia_aluna.obter_regras_formatadas()
                             )
                             parecer_ia = parecer_obj.get("decision", "BLOCK")
                             
@@ -288,6 +301,7 @@ def loop_atualizacao_velas():
                                         # Registra para monitoramento
                                         ordens_em_andamento.append({
                                             "id": order_id,
+                                            "sinal": sinal, # Salva o sinal para reflexão futura
                                             "estrategias": estrategias_ativas,
                                             "tipo": tipo_opcao,
                                             "contexto_ml": contexto_ml_atual, # Anexa contexto para salvar no final
@@ -553,7 +567,7 @@ if __name__ == '__main__':
     # Loop de Estudo da IA Aluna (Roda a cada 10 minutos)
     def loop_estudo_aluna():
         while True:
-            time.sleep(600) # 10 minutos
+            time.sleep(600) # 10 minutos (Revertido para padrão)
             ia_aluna.estudar_professor()
             
     threading.Thread(target=loop_estudo_aluna, daemon=True).start()

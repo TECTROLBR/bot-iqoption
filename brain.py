@@ -95,7 +95,26 @@ Raw AI Response: {raw_response}
             
         return csv_string
 
-    def validar_sinal(self, sinal, historico_completo, contexto_tecnico=None, nota_aluna="", terreno=""):
+    def _verificar_excecoes_tecnicas(self, rsi, tendencia_str, preco, pivot):
+        """Verifica regras de exceção para evitar bloqueios indevidos (Pipocadas)."""
+        # Converte tendência para numérico (-1: Baixa, 1: Alta)
+        tendencia = -1 if tendencia_str == "BAIXA" else (1 if tendencia_str == "ALTA" else 0)
+        
+        # REGRA 2: Exaustão de Venda (O "Pulo do Gato")
+        if rsi < 30 and tendencia < 0:
+            return True # "AUTORIZAR_EXCECAO"
+        
+        # REGRA 3: Super-Venda (Segurança Máxima)
+        if rsi < 20:
+            return True # "AUTORIZAR_EXCECAO"
+            
+        # REGRA 1: Força no Pivot
+        if rsi < 70 and preco > pivot:
+            return True # "AUTORIZAR_EXCECAO"
+
+        return False
+
+    def validar_sinal(self, sinal, historico_completo, contexto_tecnico=None, nota_aluna="", terreno="", regras_dinamicas=""):
         """
         Usa a IA da Groq para validar se um sinal de entrada é seguro.
         Retorna "PROCEED" ou "BLOCK".
@@ -107,6 +126,18 @@ Raw AI Response: {raw_response}
 
         if not historico_completo:
             return {"decision": "BLOCK", "source": "SYSTEM", "reason": "Histórico de velas insuficiente"}
+
+        # --- LÓGICA DE EXCEÇÃO (ANTI-PIPOCADA) ---
+        # Verifica regras técnicas antes de aplicar filtros da Aluna ou chamar a Groq.
+        if contexto_tecnico and sinal == 'CALL': # Regras focadas em oportunidades de compra/reversão
+            rsi = contexto_tecnico.get('rsi', 50)
+            tendencia_str = contexto_tecnico.get('tendencia', 'NEUTRA')
+            preco = contexto_tecnico.get('close', 0)
+            pivot = contexto_tecnico.get('media_20', 0) # Usa SMA 20 como Pivot dinâmico
+            
+            if self._verificar_excecoes_tecnicas(rsi, tendencia_str, preco, pivot):
+                self.log_pensamento(f"⚠️ Exceção Técnica Detectada! Ignorando filtros da Aluna para {sinal}.")
+                return {"decision": "PROCEED", "source": "EXCEPTION_RULE", "reason": "Regra de Exceção Técnica (RSI/Pivot)"}
 
         # --- FILTRO DE ECONOMIA DE TOKENS (RALLY) ---
         # Se a Aluna detectou "BURACOS", nem incomoda o Professor (Groq).
@@ -143,6 +174,7 @@ Indicadores: {indicadores_str}
 Price Action (3 velas): {velas_str}
 Sinal: {sinal}
 Nota da Aluna (Regra Local): {nota_aluna}
+Regras Aprendidas (Exceções): {regras_dinamicas}
 Ação (PROCEED/BLOCK)?
 """
 
@@ -178,10 +210,12 @@ class StudentSLM:
     """
     def __init__(self):
         self.arquivo_dados = "brain_training_data.csv"
+        self.arquivo_regras = "regras_dinamicas.txt"
         self.regra_atual = "Nenhuma regra definida ainda. Opere com cautela."
         self.ollama_url = "http://localhost:11434/api/generate"
-        self.model = "qwen:0.5b" # Modelo leve sugerido
+        self.model = "deepseek-r1:1.5b" # Modelo leve sugerido
         self._lock = threading.Lock()
+        self.regras_dinamicas = self._carregar_regras()
 
     def classificar_terreno(self, contexto):
         """
@@ -217,9 +251,10 @@ class StudentSLM:
 
         print("🎓 IA Aluna: Iniciando estudo do diário de trades (Ollama)...")
         try:
-            with open(self.arquivo_dados, "r", encoding="utf-8") as f:
-                linhas = f.readlines()
-                dados_recentes = linhas[-30:] # Janela de esquecimento
+            with self._lock: # Protege a leitura para evitar conflito com a gravação de trades
+                with open(self.arquivo_dados, "r", encoding="utf-8") as f:
+                    linhas = f.readlines()
+                    dados_recentes = linhas[-30:] # Janela de esquecimento
 
             if len(dados_recentes) < 5: return
 
@@ -228,34 +263,131 @@ class StudentSLM:
 Analise este histórico de trades (CSV):
 {csv_texto}
 
-O cabeçalho é: votos_call,votos_put,terreno,rsi,atr,bb_width,decisao_ia,resultado_real.
-'atr' e 'bb_width' medem a volatilidade.
-Identifique padrões de ERRO (LOSS) combinando terreno e indicadores.
-Exemplo: "LOSS em LAMA com RSI > 60" ou "LOSS em ASFALTO com ATR muito alto".
+O cabeçalho é: votos_call,votos_put,terreno,rsi,atr,bb_width,dist_sma,vol_rel,decisao_ia,resultado_real.
+Novas métricas:
+- dist_sma: Distância do preço para a Média Móvel (Se muito alto/baixo, preço esticou).
+- vol_rel: Volume Relativo (Acima de 1.0 = Volume alto/Explosão).
 
-Gere UMA única regra curta e direta para o trader evitar prejuízo agora.
-Responda em Português. Máximo 15 palavras.
+Sistema de Pontuação:
+LOSS = -10 pontos (Evitar a todo custo).
+MISSED_WIN = -5 pontos (Evitar ficar de fora de movimentos bons).
+
+Identifique padrões que causam perda de pontos.
+Gere UMA regra técnica baseada em NÚMEROS (Ex: RSI > 70) para maximizar a pontuação.
+NÃO use frases genéricas como "não ter prejuízo". Seja técnico.
 Regra:
 """
             
             payload = {
                 "model": self.model, "prompt": prompt, "stream": False,
-                "options": {"temperature": 0.3, "num_ctx": 1024}
+                "options": {"temperature": 0.3, "num_ctx": 2048}
             }
             
-            response = requests.post(self.ollama_url, json=payload, timeout=30)
+            # Aumentado para 900s (15 min) para evitar erro de Timeout com DeepSeek
+            response = requests.post(self.ollama_url, json=payload, timeout=900)
             if response.status_code == 200:
                 nova_regra = response.json().get("response", "").strip()
                 if nova_regra:
                     self.regra_atual = nova_regra
                     print(f"🎓 IA Aluna (Nova Regra): {self.regra_atual}")
+                    
+                    # Salva a regra aprendida no arquivo permanente
+                    with self._lock:
+                        if nova_regra not in self.regras_dinamicas:
+                            self.regras_dinamicas.append(nova_regra)
+                            with open(self.arquivo_regras, "a", encoding="utf-8") as f:
+                                f.write(f"{nova_regra}\n")
         except Exception as e:
             print(f"🚨 Falha ao estudar professor: {e}")
 
+    def _carregar_regras(self):
+        """Carrega regras dinâmicas do arquivo."""
+        if not os.path.exists(self.arquivo_regras): return []
+        try:
+            with open(self.arquivo_regras, "r", encoding="utf-8") as f:
+                return [line.strip() for line in f.readlines() if line.strip()]
+        except: return []
+
+    def obter_regras_formatadas(self):
+        """Retorna as últimas 3 regras aprendidas para injetar no prompt."""
+        if not self.regras_dinamicas: return "Nenhuma regra extra."
+        return " | ".join(self.regras_dinamicas[-3:])
+
+    def refletir_sobre_erro(self, tipo_erro, sinal, contexto, historico_velas):
+        """
+        Motor de Auto-Reflexão: Analisa erros (MISSED_WIN ou PROCEED_LOSS)
+        e gera novas regras de exceção usando a IA Local.
+        """
+        print(f"🤔 IA Aluna: Refletindo sobre erro {tipo_erro} em {sinal}...")
+        
+        # Prepara os dados para a IA
+        rsi = contexto.get('rsi', 50)
+        tendencia = contexto.get('tendencia', 'N/A')
+        bb_width = contexto.get('bb', {}).get('bandwidth', 0)
+        close = contexto.get('close', 0)
+        media_20 = contexto.get('media_20', 0)
+        dist_sma = close - media_20
+        
+        # Formata histórico recente para o prompt
+        hist_str = ""
+        for v in historico_velas:
+            hist_str += f"[{v['open']:.4f}, {v['close']:.4f}, {v['max']:.4f}, {v['min']:.4f}] "
+
+        prompt_reflexao = f"""
+Você é um trader algorítmico.
+Sistema de Pontuação:
+LOSS = -10 pontos.
+MISSED_WIN = -5 pontos.
+
+Erro: {tipo_erro} (O robô errou ao decidir sobre um {sinal}).
+Contexto Técnico: RSI={rsi:.2f}, Tendência={tendencia}, Distância SMA={dist_sma:.5f}, Volatilidade={bb_width:.5f}.
+Últimas 15 velas: {hist_str}
+
+Se bloqueou um WIN (MISSED_WIN), analise: o RSI estava em que nível? Teve pavio?
+Crie uma regra de exceção técnica baseada em NÚMEROS para evitar perder pontos.
+NÃO use frases genéricas.
+Exemplo: "Se RSI < 30 e pavio > 2x corpo, autorizar CALL."
+Nova Regra:
+"""
+        
+        try:
+            payload = {
+                "model": self.model, 
+                "prompt": prompt_reflexao, 
+                "stream": False,
+                "options": {"temperature": 0.4, "num_ctx": 2048}
+            }
+            
+            # Aumentado para 900s (15 min) para evitar erro de Timeout
+            response = requests.post(self.ollama_url, json=payload, timeout=900)
+            if response.status_code == 200:
+                nova_regra = response.json().get("response", "").strip().replace("\n", " ")
+                if nova_regra:
+                    with self._lock:
+                        self.regras_dinamicas.append(nova_regra)
+                        with open(self.arquivo_regras, "a", encoding="utf-8") as f:
+                            f.write(f"{nova_regra}\n")
+                    print(f"💡 IA Aluna (Insight): Nova regra aprendida -> {nova_regra}")
+        except Exception as e:
+            print(f"🚨 Erro na auto-reflexão: {e}")
+
     def _ensure_csv_header(self):
         """Cria o cabeçalho do CSV se o arquivo não existir ou estiver vazio."""
-        header = "votos_call,votos_put,terreno,rsi,atr,bb_width,decisao_ia,resultado_real\n"
+        header = "votos_call,votos_put,terreno,rsi,atr,bb_width,dist_sma,vol_rel,decisao_ia,resultado_real\n"
+        
+        # Verifica se precisa recriar o arquivo (se não existe ou se é o formato antigo)
+        recriar = False
         if not os.path.exists(self.arquivo_dados) or os.path.getsize(self.arquivo_dados) == 0:
+            recriar = True
+        else:
+            # Lê a primeira linha para ver se tem as novas colunas
+            with open(self.arquivo_dados, "r", encoding="utf-8") as f:
+                primeira_linha = f.readline()
+                if "dist_sma" not in primeira_linha:
+                    print("⚠️ Atualizando formato do cérebro (CSV) para incluir Volume e SMA...")
+                    recriar = True
+        
+        if recriar:
             with open(self.arquivo_dados, "w", encoding="utf-8") as f:
                 f.write(header)
 
@@ -268,6 +400,15 @@ Regra:
             rsi = contexto_tecnico.get('rsi', 50)
             atr = contexto_tecnico.get('atr', 0)
             bb_width = contexto_tecnico.get('bb', {}).get('bandwidth', 0)
+            
+            # Novos Dados
+            close = contexto_tecnico.get('close', 0)
+            media_20 = contexto_tecnico.get('media_20', 0)
+            volume = contexto_tecnico.get('volume', 0)
+            vol_medio = contexto_tecnico.get('vol_medio', 1)
+            
+            dist_sma = close - media_20
+            vol_rel = volume / vol_medio if vol_medio > 0 else 0
 
             linha = (f"{dados_mercado.get('votos_call',0)},"
                      f"{dados_mercado.get('votos_put',0)},"
@@ -275,6 +416,8 @@ Regra:
                      f"{rsi:.2f},"
                      f"{atr:.6f},"
                      f"{bb_width:.6f},"
+                     f"{dist_sma:.6f},"
+                     f"{vol_rel:.2f},"
                      f"{decisao_ia},"
                      f"{resultado_real}\n")
             try:

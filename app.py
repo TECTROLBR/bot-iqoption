@@ -113,6 +113,7 @@ def loop_checagem_resultados():
                         terreno_op = ordem['contexto_ml'].get('terreno', 'DESCONHECIDO')
                         contexto_tecnico_op = ordem.get('contexto_tecnico', {})
                         ia_aluna.registrar_telemetria(ordem['contexto_ml'], contexto_tecnico_op, ordem['contexto_ml']['decisao_groq'], resultado_real, terreno_op)
+                        print(f"📝 Aprendizado Registrado: ID {ordem['id']} | Decisão IA: {ordem['contexto_ml']['decisao_groq']} | Resultado: {resultado_real}")
 
                         # --- AUTO-REFLEXÃO (PROCEED_LOSS) ---
                         if not win:
@@ -165,6 +166,7 @@ def loop_atualizacao_velas():
                         dados_formatados = formatar_vela(vela_fechada_nova, ativo_atual)
                         historico_velas.append(dados_formatados)
                         print(f"--- NOVA VELA FECHADA: {dados_formatados['horario_formatado']} ---")
+                        time.sleep(1) # Trava de segurança: Evita spam de requests no mesmo segundo
                         
                         # --- SHADOW TRACKING: VALIDAÇÃO DOS BLOQUEIOS ANTERIORES ---
                         # Verifica se a vela que acabou de fechar confirmou ou negou o bloqueio da IA
@@ -250,18 +252,18 @@ def loop_atualizacao_velas():
                             print(f"🎓 IA Aluna: Terreno identificado -> {terreno_atual}")
                             print(f"📝 Nota da Aluna para o Professor: {ia_aluna.regra_atual}")
 
-                            # --- NOVA VALIDAÇÃO COM GROQ AI ---
-                            parecer_obj = ia_brain.validar_sinal(
+                            # --- NOVA VALIDAÇÃO: OLLAMA É O CHEFE ---
+                            # Substituída a chamada da Groq pela IA Local (Aluna)
+                            parecer_obj = ia_aluna.validar_sinal_local(
                                 sinal=sinal,
-                                historico_completo=historico_analise,
-                                contexto_tecnico=contexto_atual,
-                                nota_aluna=ia_aluna.regra_atual,
-                                terreno=terreno_atual,
-                                regras_dinamicas=ia_aluna.obter_regras_formatadas()
+                                contexto=contexto_atual,
+                                historico_recente=historico_analise
                             )
+                            
                             parecer_ia = parecer_obj.get("decision", "BLOCK")
                             
-                            contexto_ml_atual["decisao_groq"] = parecer_ia
+                            # Registra quem tomou a decisão (Ollama agora)
+                            contexto_ml_atual["decisao_groq"] = f"{parecer_ia} (Ollama)"
 
                             # LÓGICA DE DECISÃO FINAL (Híbrida)
                             
@@ -269,10 +271,10 @@ def loop_atualizacao_velas():
                                 source = parecer_obj.get("source", "UNKNOWN")
                                 reason = parecer_obj.get("reason", "Risco não especificado.")
 
-                                if source == "ALUNA_FILTER":
-                                    print(f"🛡️ Aluna BLOQUEOU a operação de {sinal}. Motivo: {reason}.")
+                                if source == "OLLAMA_LOCAL":
+                                    print(f"🛡️ Aluna (Ollama) BLOQUEOU a operação de {sinal}. Motivo: {reason}.")
                                 else: # GROQ_API, API_ERROR, etc.
-                                    print(f"🧠 Groq BLOQUEOU a operação de {sinal}. Motivo: {reason}.")
+                                    print(f"🛑 Bloqueio Técnico/Erro: {reason}.")
 
                                 # Registra para validação na próxima vela (Shadow Tracking)
                                 bloqueios_pendentes.append({

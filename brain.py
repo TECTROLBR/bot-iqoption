@@ -136,8 +136,8 @@ Raw AI Response: {raw_response}
             pivot = contexto_tecnico.get('media_20', 0) # Usa SMA 20 como Pivot dinâmico
             
             if self._verificar_excecoes_tecnicas(rsi, tendencia_str, preco, pivot):
-                self.log_pensamento(f"⚠️ Exceção Técnica Detectada! Ignorando filtros da Aluna para {sinal}.")
-                return {"decision": "PROCEED", "source": "EXCEPTION_RULE", "reason": "Regra de Exceção Técnica (RSI/Pivot)"}
+                self.log_pensamento(f"⚠️ Exceção Técnica Detectada! Mas respeitando filtro da Aluna para {sinal}.")
+                # return {"decision": "PROCEED", "source": "EXCEPTION_RULE", "reason": "Regra de Exceção Técnica (RSI/Pivot)"}
 
         # --- FILTRO DE ECONOMIA DE TOKENS (RALLY) ---
         # Se a Aluna detectou "BURACOS", nem incomoda o Professor (Groq).
@@ -213,8 +213,9 @@ class StudentSLM:
         self.arquivo_regras = "regras_dinamicas.txt"
         self.regra_atual = "Nenhuma regra definida ainda. Opere com cautela."
         self.ollama_url = "http://localhost:11434/api/generate"
-        self.model = "deepseek-r1:1.5b" # Modelo leve sugerido
+        self.model = "qwen2.5:1.5b" # Modelo leve sugerido
         self._lock = threading.Lock()
+        self._ollama_lock = threading.Lock()
         self.regras_dinamicas = self._carregar_regras()
 
     def classificar_terreno(self, contexto):
@@ -284,7 +285,8 @@ Regra:
             }
             
             # Aumentado para 900s (15 min) para evitar erro de Timeout com DeepSeek
-            response = requests.post(self.ollama_url, json=payload, timeout=900)
+            with self._ollama_lock:
+                response = requests.post(self.ollama_url, json=payload, timeout=900)
             if response.status_code == 200:
                 nova_regra = response.json().get("response", "").strip()
                 if nova_regra:
@@ -312,6 +314,60 @@ Regra:
         """Retorna as últimas 3 regras aprendidas para injetar no prompt."""
         if not self.regras_dinamicas: return "Nenhuma regra extra."
         return " | ".join(self.regras_dinamicas[-3:])
+
+    def validar_sinal_local(self, sinal, contexto, historico_recente):
+        """
+        A Aluna (Ollama) decide se aprova a operação.
+        Substitui a Groq no loop principal para economizar tokens.
+        """
+        print(f"🎓 Aluna (Ollama) analisando sinal de {sinal}...")
+        
+        # Prepara dados resumidos para não "afogar" o modelo local
+        rsi = contexto.get('rsi', 50)
+        tendencia = contexto.get('tendencia', 'N/A')
+        terreno = self.classificar_terreno(contexto)
+        
+        # Prompt direto e objetivo para o modelo local (DeepSeek/Llama)
+        prompt = f"""
+Atue como Gerente de Risco Sênior.
+Sinal Indicado: {sinal}
+Cenário Técnico:
+- Terreno: {terreno}
+- Tendência: {tendencia}
+- RSI: {rsi:.1f}
+- Regra Atual Aprendida: {self.regra_atual}
+
+Analise o risco. Se o terreno for 'BURACOS' ou 'LAMA', seja conservador.
+Responda EXATAMENTE neste formato JSON:
+{{"decision": "PROCEED" ou "BLOCK", "reason": "motivo curto"}}
+"""
+        try:
+            payload = {
+                "model": self.model, 
+                "prompt": prompt, 
+                "stream": False,
+                "format": "json", # Força resposta JSON (suportado em versões novas do Ollama)
+                "options": {"temperature": 0.1, "num_ctx": 1024}
+            }
+            
+            # Tenta adquirir o lock sem bloquear a thread principal (Trading)
+            if self._ollama_lock.acquire(blocking=False):
+                try:
+                    response = requests.post(self.ollama_url, json=payload, timeout=30)
+                finally:
+                    self._ollama_lock.release()
+            else:
+                return {"decision": "BLOCK", "source": "OLLAMA_BUSY", "reason": "IA Ocupada (Limitado a 1 thread)"}
+
+            if response.status_code == 200:
+                resp_json = response.json().get("response", "")
+                dados = json.loads(resp_json)
+                return {"decision": dados.get("decision", "BLOCK"), "source": "OLLAMA_LOCAL", "reason": dados.get("reason", "Análise Local")}
+        except Exception as e:
+            print(f"🚨 Erro na Aluna Local: {e}")
+            return {"decision": "BLOCK", "source": "LOCAL_ERROR", "reason": "Ollama indisponível"}
+        
+        return {"decision": "BLOCK", "source": "LOCAL_DEFAULT", "reason": "Incerteza da IA Local"}
 
     def refletir_sobre_erro(self, tipo_erro, sinal, contexto, historico_velas):
         """
@@ -359,7 +415,8 @@ Nova Regra:
             }
             
             # Aumentado para 900s (15 min) para evitar erro de Timeout
-            response = requests.post(self.ollama_url, json=payload, timeout=900)
+            with self._ollama_lock:
+                response = requests.post(self.ollama_url, json=payload, timeout=900)
             if response.status_code == 200:
                 nova_regra = response.json().get("response", "").strip().replace("\n", " ")
                 if nova_regra:

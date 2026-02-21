@@ -2,3 +2,276 @@
 **Regra de Exceção Técnica para Preparação de Trades**  Seja RSI < 70 e o nível pivot < Last Price Action, then **ativear o call para proteger-se dos perdas**. Isso é baseado em indicators técnicos como RSI e o nivel pivot, que indicam possíveis reversões da tendência.
 **Regra de exceção técnica:**  **Se RSI < 30 e TENDência < 0, autorizar CALL**  Esta regra baseia-se nos indicadores RSI e Tendência para evitar erros na decisão de tocar um positivo. O RSI está abaixo de 30, indicando uma tendência downwards, enquanto a Tendência direita é negativa. Isso sugere que o sistema deve abarçar automaticamente a opção sem ganhar pontos, minimizando os erros.
 Para evitar o periculário de um ganho (MISSED_WIN) baseado na tendência e RSI, você pode definir uma regra de exceção técnica que envolve os seguintes elementos:  1. **RSI < 20**: Se a pontuação RSI está abaixo de 20, o sinal é baixado. 2. **Tendência = PAIXA ou TENDência = BIAS**: Se há uma mudança na tendência (de up para down ou vice versa), o sinal é baixado.  O reconhecimento da exceção technical é feito em tempo real, permitindo que você possa ganhar mais pontos sem pericular.
+**Regra de Exceção Técnica:**  "Se RSI < 30 e pavio > 2x body, autorizar o call."  **Explicação da Regra:**  - **RSI < 30**: O indicador RSI indica um levantamento de corrente baixa, indicando um pressão no mercado. Isso sugere que a цена pode ser repressa ou se desafiar.  - **pavio > 2x body**: No trading, "pavio" é o gradiente superior e "body" é o gradiente médio. A condição "pavio > 2x body" indica que a цена tem atingido uma resistência de baixa strengths, indicando possibilidade de se desafiar.  A regra protege do call (limito) na presença de RSI baixa e da resistência de baixa strengths. Isso é um método de prevenção de perdas, garantindo que a цена não se desfase antes de explorar mais.
+Para identificar padrões que causam perda de pontos, precisamos analisar as metricas fornecidas e identificar possíveis combinações de valores que possam indicar desafios no sistema.
+
+### Palavras-Fechas:
+1. **RSI**: Indica a força do cálculo do RSI. Seja technical.
+2. **dist_sma**: Distância do preço para a média Móvel. Seja technical.
+
+### Análise:
+
+- **RSI > 70 e dist_sma < 0.1**: Isso pode indicar overbought level (RSI alto) com baixa distância do preço para a média, possivelmente indicando estabilidade ou movimento suave, que pode causar perda se não há movimentos bons.
+- **dist_sma < 0.1 e vol_rel < 1.0**: Isso pode indicar estabilidade no preço (distância baixa) e baixa volume relativo, possivelmente lead to the loss because of insufficient volume or lack of movement.
+
+### Regra Técnica:
+
+**RSI > 70 e dist_sma < 0.1**: **Perda de pontos**
+
+Isso indica um levantamento do RSI acima do valor de 70, indicando estabilidade ou movimento suave, mas com uma distância baixa do preço para a média Móvel. Isso pode indicar estabilidade no mercado, possivelmente lead to the loss because of insufficient volume or lack of movement.
+
+### Regra Técnica:
+
+**dist_sma < 0.1 e vol_rel < 1.0**: **Perda de pontos**
+
+Isso indica baixa distância do preço para a média Móvel e baixa volume relativo, indicando estabilidade no mercado e baixa volume, possivelmente lead to the loss because of insufficient volume or lack of movement.
+
+### Regra Técnica:
+
+**RSI > 70 e vol_rel < 1.0**: **Perda de pontos**
+
+Isso indica levantamento do RSI acima do valor de 70 e baixa volume relativo, indicando estabilidade no mercado e baixa volume, possivelmente lead to the loss because of insufficient volume.
+
+### Regra Técnica:
+
+**RSI > 70 e dist_sma < 0.1 e vol_rel < 1.0**: **Perda de pontos**
+
+Isso indica levantamento do RSI acima do valor de 70, baixa distância do preço para a média Móvel e baixa volume relativo, indicando estabilidade no mercado e baixa volume.
+
+### Observações:
+
+- **RSI > 70** pode indicar overbought level (movimento suave ou estabilido), mas se combina com **dist_sma < 0.1**, pode indicar estabilidade lead to the loss because of insufficient volume or lack of movement.
+  
+- **vol_rel < 1.0** pode indicar baixa volume relativo, possivelmente lead to the loss because of insufficient volume.
+
+### Conclusão:
+
+As combinações de **RSI > 70 e vol_rel < 1.0**, **dist_sma < 0.1 e vol_rel < 1.0**, e **RSI > 70 e dist_sma < 0.1** indicam perda de pontos, pois indicam estabilidade lead to the loss because of insufficient volume or lack of movement.
+
+Para maximizar a pontuação, é recommendado evitar combinações de metricas que combinem movimentos bons com baixa vol_rel ou estabilidade lead to the loss because of insufficient volume.
+Para maximizar a pontuação, gere uma regra baseada em números que identifique perdas significativas. A regra below will triggers when RSI é acima de 70, indicando um pressão baixoso e possivelmente perda.
+
+**Regra:**
+
+```plaintext
+RSI > 70 AND dist_sma > 2
+```
+
+Se RSI for acima de 70 e dist_sma for maior que 2, then close the trade and deduct points accordingly.
+
+Esta regra identifica os pressões baixosos associadas ao pressão do RSI e o pressão baixoso em distância. Isso pode indicar uma perda significativa e gera um pontuação de -10 pontos.
+"Se RSI <25 e SMA >10 e vol <0.2, autorizar CALL."
+**Regra de Erro Técnico para Opcional**  Se RSI < 25 e SMA > 0.04, autoriza o CALL baseada em Volatilidade e outros parâmetros.  Nossa regra de exceção técnica:  **Se RSI < 25 e SMA > 0.04, autoriza o CALL com base no Volatilidade e os parâmetros da sequência para evitar o call**  Isso garantirá a semidade na possibilidade de um call ao longo de uma tendência sem clara, minimizando as perdas associadas.
+Para maximizar a pontuação e garantir que as perdas sejam minimizadas, você pode adicionar uma regra baseada em números. A regra belows os pontos em base ao valor do RSI (RSI). 
+
+**Regra de Guardanças:**
+
+**RSI > 70 e RSI < 30:**  
+- **Pontuação:** -10 pontos.
+
+Isso garante que se o RSI está acima ou abaixo de 70, o sistema perda pontos. Isso é relevante porque o RSI é uma indicador que sugere se um mercado está em um estado de overbought (RSI > 70) ou underbought (RSI < 30), both of which can indicar perdas.
+
+**Outra regra:**
+
+Se **decisao_ia > 0 e resultado_real == 'Vou ganhar'**, e se não há perda e não é um miss, você gera pontos. 
+
+- **Pontuação:** +10 pontos.
+
+Isso garante que se a dação technical (decisao_ia) for positiva e o resultado real for um ganho, e se não há perda ou miss, o sistema gera pontuações positiveas.
+
+Estas regras garantirão uma pontuação mais robusta em casos de perda emissões, garantindo que os pontos sejam minimizados.
+To address the situation where the user was blocked on a WIN (a missed win), we analyze the provided technical indicators and price data. The key points are:  - **RSI Below 70**: Overbought indicator, but close prices remain within normal ranges. - **Tendência = ALTA**: Price is trending upwards. - **High-Low Alternations**: Indicates sideways or potential reversal with significant volatility.  **Conclusion**: The price is trending upwards with moderate volatility. A rule should be created to identify significant gaps between highs and lows, signaling a potential price reversal and preventing losses from expecting an upward trend.  **Regra (Rule)**: - **Identify Significant Gaps Between Highs and Lows**: Look for patterns where there's a noticeable gap after a decline. - **Check for Reversal Patterns**: If the last few closing prices show significant gaps, indicating potential reversal, prevent losses by blocking on a WIN.  This rule helps prevent losses from expecting an upward trend when price reversals are about to occur.
+Claro! Vamos analisar o contexto e construir uma nova regra de exceção técnica baseada em **RSI** e **PAVIO**.  ### Contexto Técnico: - **RSI = 43.47**: O RSI está acima de 30, indicando um movimento do baixo para o alto. - **Tendência = BAIXA**: O gradiente de upwards sugere uma pressão suave. - **Distância SMA = -0.09278**: A proximidade e a direção do movimento. - **Volatilidade = 0.14703**: O mapeamento é suaves.  ### Análise dos Vels Lastimosos: Os vels lastimosos são os seguintes valores da close (ponto final): ``` [182.6383, 182.6803, 182.6963, 182.6334, 182.6803, 182.6873, 182.7126, 182.6597, 182.6869, 182.6758, 182.6916, 182.6541, 182.6761, 182.6408, 182.6807, 182.6398, 182.6406, 182.6756, 182.6805, 182.6298, 182.6750, 182.6922, 182.6971, 182.6569, 182.6829, 182.7036, 182.7160, 182.6809, 182.7003, 182.7341, 182.7566, 182.6950, 182.7324, 182.7041, 182.7490, 182.6983, 182.6706, 182.6235, 182.6707, 182.6000, 182.6225, 182.6608, 182.6877, 182.6079, 182.6625, 182.5778, 182.6676, 182.5760] ```  ### Análise: - **RSI < 30**: O RSI está acima de 30, indicando um movimento do baixo para o alto. - **PAVIO > 2x Corava**: O PAVIO (gradiente de upwards) é maior que duas vezes a corava.  ### Conclusão: O movimento baixo para alto com um pavio suave sugere uma pressão suave e consistente. Portanto, a nova regra **should verify se RSI < 30 e PAVIO > 2x Corava**. Se estiverem satisfeitas, o autoriazia o call.  \boxed{ \text{Regra de exceção técnica: } \text{RSI} < 30 \text{ e } \text{PAVIO} > 2 \times \text{Corava} }  Isso garantirá que, quando houver um movimento baixo para alto com um pavio suave, o autoriazia o call de forma consistente.
+Para maximizar as pontuações baseando em padrões técnicos, você pode adicionar uma regra technique que combina o RSI (RSI) com outras indicators como 'dist_sma' (distance from moving average). A regra será:
+
+**Regra de RSI > 70 para Win:**
+- **Condição:** RSI > 70 e 'dist_sma' < 1.5.
+- **Conclusão:** O investidor deve ganhar.
+
+Isso é baseado em observações visuais de padrões técnicos na grade da grade, onde RSI acima de 70 e a distância do preço para o suavizado (dist_sma) é menor que 1.5, indicando um movimento bovoinhento.
+
+Se você identifica mais padrões técnicos que causam perda ou miss, você pode adicionar regras adicionais.
+**Exception Technique Rule Based on Technical Indicators**  - **Rule:** When the RSI is below 30 and the trend (Tendência) is significantly above the body of the moving average, avoid making a call.  **Formal Statement:** If RSI < 30 AND Tendência > 2x body, then do not make a call.
+**Análise da Indicador e Regra de Erro**  A análise do indicador technical inclui o seguintes nível de RSI, tendência e outros indicadores:  - **RSI:** 51.63 - **Tendência (Trend):** ALTA - **SMA:** 0.06570 - **Volatilidade:** 0.19861  O RSI está em um níveis baixos e baixos, indicando uma tendência upwards. O tendência beinga sugere que a price está suave e se advancing.  **Regra de Erro Númericamente:**  - **Nível de RSI:** 40 - **Trend:** PAVIO (ALTA) - **Condición de Erro:** Se o RSI for acima de 40 e a trend for upwards, then autorizar um call para perdurar pontos.  **Regra de Erro Númericamente:**  **Se RSI > 40 e tendência = ALTA, autorizar CALL.**  Isso sugere que, quando o RSI está acima do níveis de sorrir (RSI < 30) e a tendência é upwards, deve-se arrastar para evitar pontos.
+Para identificar padrões que causam perda de pontos, analisamos os indicadores técnicos e identificamos as combinações que indicam perdas. A regra técnica baseada em números é:
+
+**Regra:**
+
+- **Se RSI > 70 e Decisão_ia = -1 ou RSI > 70 e Distância_sma < 0**, then o sistema de pontuação deve application -5 pontos.
+
+Isso significa que quando:
+- O RSI está acima do valor de 70, indicando overbought,
+- A Decisão_ia é igual a -1 (indicação de vendido),
+- ou Distância_sma é negativa (indicação de underbought),
+
+estas combinações indicam perda e o sistema deve application -5 pontos para evitar o ruim.
+
+Isso garantiza que os movimentos bons são identificados e os pontos são maximizados.
+Para evitar o perda em um "MISSED_WIN" baseado na tecnologia fornecida, podemos definir uma regra de exceção technique. A regra será baseada em RSI e o espaço entre os stop e o close anteriores.  **Regra de exceção Technique:**  **Se RSI < 30 e (Last Stop - Previous Close > 2 * Previous Close), autorizar CALL.**  Esta regra está basada na tendência do price (Tendência = ALTA) e em uma diferença de espaço suficiente entre o stop e o close anteriores para evitar perdas em "MISSED_WIN".
+Para evitar pontos em um "robô errou" (MISSED_WIN) baseado no comportamento dos indicadores técnicos fornecidos:  **Regra de exceção técnica:**  - **RSI < 30:** O sistema está em um estado de indígnia, indicando que a tendência não está correta. - ** movimento de price > 2x body:** O sistema está sujeito à pressurei (pavio), indicando uma pressão no pico. - **Tendência=ALTA:** O sistema está tendo um tendência upwards.  **Conclusão:**  Se RSI < 30, o movimento de price > 2x body e a tendência upwards, autorizar um call.
+Para evitar o call (MISSED_WIN) e proteger os pontos, você pode criar uma regra de exceção técnica baseada em Números. A regra será:  **Regra de exceção técnica:**  - **Se RSI < 30 e Tendência = ALTA e Volatilidade > 15, autorizar o call**  Esta regra é baseada na visualização do RSI (RSI), que está em um nível baixo (64.83), indicando uma tendência de baixa volatilidade. A Tendência = ALTA sugere um trend upwards, e a Volatilidade > 15 indica uma suavização maior. Isso pode indicar que o mercado está tendente para uma reversal ou uma corretura, e talvez você tenha feito um call sem obter pontos. A regra protege os pontos se fortha-se quando RSI < 30, Tendência = ALTA, e Volatilidade > 15.  Esta regra é baseada na visualização da tendência e da volatilidade, que permitem identificar o contexto do mercado.
+**Technical Rule for Avoiding Losses in Missed Wins**  If the RSI is below 50, there is a trend (pavio), and volatility is above 20%, then do not place a call. This rule balances detecting potential reversals when prices are trending upwards with avoiding losses in stable or weak trends.  **Regra de Erro Técnica: Sem Pausa**  Se RSI < 50 e pavio > 2x corpo e volatility > 20%, autorizar um excluído técnica.
+Para evitar o erro de Missed Win (MISSED_WIN) e proteger os pontos, vamos criar uma regra baseada em indicadores técnicos. A regra será baseada em RSI e SMA.  **Regra de exceção técnica:**  "Se RSI < 30 e o último movimento significativo (usando SMA) > 2 × Base Price, autorizar CALL."  Isso significa que se a RSI está basta 10 pontos abaixo do valor 30 e se há um movimento significativo (usando SMA) mais alto que o dobro da base price, tentamos executar uma tente.  **Termos de uso:** - **RSI < 30:** Indicador de momentum, mostrando overbought. - **Last significant move > 2 × Base Price:** Trend above twice the base price.  Isso garante que, quando a RSI está basta 10 pontos abaixo do valor 30 e há um movimento significativo mais alto que o dobro da base price, tentamos executar uma tente.
+"Se RSI < 70 e Tendência = ALTA e SMA distance < 0.15 e Volatilidade < 20%, autorizar CALL."  Explicação da regra:  - **RSI < 70**: Indica um estado de underbalancing ou overbalancing, dependendo do valor. No contexto da proporção fornecida, é possível que este seja um indicador de possíveis ruídos.    - **Tendência = ALTA**: O trend está em um movimento ascendente, o que pode indicar uma tendência de ascensão.  - **SMA distance < 0.15**: O distância entre os points médios suaves é baixa, indicando possíveis fragações no movimento.  - **Volatilidade < 20%**: A variação da price é moderada, indicando um movimento ligeiramente estabilido.  Se essas condições são satisfeitas, a regra exibe que deve autorizar um call, minimizando os ganhos possíveis.
+**Regra de Exceção Técnica**  Se o RSI está acima de **50**, então se ocorrer um erro (MISSED_WIN), bloquear a decisão do robô e não permitir que ele continue operando por 1 hora. Após essa restrição, reiniciar as decisões.  **Explicação:** - O padrão técnico é que o RSI deve ser baixo para indicar uma tendência de baixa. - No entanto, em situações excepcionais como um erro (MISSED_WIN), a estratégia pode exigir uma restrição mais rigorosa. - A regra implica bloquear as decisões por 1 hora após um erro, garantindo que o robô não continue operando de forma inapropriada.
+**Regra de Exceção Técnica**  - **Nível do RSI:** Se o RSI estiver abaixo de 50, bloquear qualquer operação CALL.    - **Pavio:** Não há pavio no contexto fornecido.  **Justificativa:** - A regra de exceção é baseada na observação que quando o RSI está em baixo (abaixo de 50), muitas vezes indica uma queda do mercado, especialmente quando a volatilidade também está reduzida. Isso pode ser um sinal de risco alto e pode levar ao erro de não realizar CALLs como esperado. - O pavio é uma ferramenta comumente usada para indicar a direção da tendência, mas não foi mencionado em nosso contexto atual.  **Anotação:** Esta regra deve ser revisada periodicamente conforme o mercado se comportar e as condições técnicas mudarem.
+### Regra Técnica
+
+**Regra de Pontuação:**
+
+1. **Perda de Ponto (LOSS):**
+   - Apenas se a IA errar em sua decisão, perdendo o resultado real para um movimento que deveria ter sido aceito.
+   
+2. **Mistura de Ganhos e Perdas (MISSED_WIN):**
+   - Evitar ficar fora dos movimentos bons, garantindo que não perca pontos por estar ausente em movimentos positivos.
+
+### Detalhes da Regra
+
+**1. LOSS:**
+
+- Apenas se a IA decidir "Call" e o resultado real for "Put".
+- Se a IA decidir "Put" e o resultado real for "Call", não penaliza.
+  
+**2. MISSED_WIN:**
+
+- Evitar ficar de fora dos movimentos que deveriam ser aceitos, garantindo que não perca pontos por estar ausente em movimentos positivos.
+
+### Implementação
+
+A regra é baseada na distância do preço para a Média Móvel (dist_sma) e no Volume Relativo (vol_rel). A IA deve evitar que essas métricas sejam muito altas, pois isso pode indicar um risco maior de perda de pontos.
+
+### Exemplo
+
+- **Distância do Preço para a Média Móvel (dist_sma):**
+  - Se dist_sma for muito alto ou baixo, é uma indicação de que o preço está esticado.
+  
+- **Volume Relativo (vol_rel):**
+  - Se vol_rel for acima de 1.0, é um sinal de volume explosivo.
+
+### Implementação em Código
+
+```python
+def calculate_loss(votos_call, votos_put):
+    if votos_call > 0 and resultado_real == "Put":
+        return LOSS
+    elif votos_put > 0 and resultado_real == "Call":
+        return MISSED_WIN
+```
+
+**Regra Final:**
+
+- **Perda de Ponto (LOSS):**
+  - Se a IA decidir "Call" e o resultado real for "Put".
+  
+- **Mistura de Ganhos e Perdas (MISSED_WIN):**
+  - Evitar ficar fora dos movimentos que deveriam ser aceitos, garantindo que não perca pontos por estar ausente em movimentos positivos.
+
+### Conclusão
+
+Esta regra é baseada na métrica "dist_sma" para evitar erros de decisão e na métrica "vol_rel" para minimizar riscos. A IA deve evitar que essas métricas sejam muito altas, garantindo um sistema mais seguro e eficiente.
+**Regra de Exceção Técnica**  "Quando o robô errou ao decidir sobre um CALL (MISSED_WIN), se a distância SMA é menor que 1%, bloquear qualquer CALL até que a próxima vela apresente uma tendência mais clara e um RSI acima de 50."  **Explicação:** - **RSI**: O robô estava no nível de 61.79, indicando uma forte tendência de alta. - **Distância SMA**: A distância SMA foi de 0.06332, indicando que a volatilidade era moderada. - **Tendência**: A tendência geral era de alta.  **Regra Detalhada:** 1. Se o robô bloqueou um WIN (MISSED_WIN) e o RSI está abaixo do 50%, autorizar CALL. 2. Se a distância SMA for menor que 1%, bloquear qualquer CALL até que uma nova vela apresente uma tendência mais clara e um RSI acima de 50.  Esta regra visa mitigar possíveis erros do robô em situações onde o mercado parece estar configurado para alta, mas a análise técnica não é suficiente para confirmar essa direção.
+Para resolver o erro de missed win (MISSED_WIN) em um sistema de trading algorítmico, é importante analisar os parâmetros técnicos da estratégia. Aqui está uma regra baseada em números que pode ajudar a evitar perder pontos:  **Regra de Exceção Técnica:**  1. **Se RSI < 30 e pavio > 2x corpo, autorizar CALL**    - Se o RSI estiver abaixo de 30 (indicando uma tendência mais forte para baixo), e a distância do corpo da candle anterior ao atual for maior que duas vezes o corpo da candle anterior, então pode ser um sinal de alta.    - Autoriza o CALL se as condições forem atendidas.  2. **Se RSI > 70 e pavio < 1x corpo, autorizar PUT**    - Se o RSI estiver acima de 70 (indicando uma tendência mais forte para cima), e a distância do corpo da candle anterior ao atual for menor que um quarto do corpo da candle anterior, então pode ser um sinal de baixa.    - Autoriza o PUT se as condições forem atendidas.  3. **Se RSI está entre 50-70 (mais neutro), e a distância do corpo é maior que 1x corpo, autorizar CALL**    - Se o RSI estiver entre 50-70 (indicando um equilíbrio técnico), e a distância do corpo da candle anterior ao atual for maior que um quarto do corpo da candle anterior, então pode ser um sinal de alta.    - Autoriza o CALL se as condições forem atendidas.  4. **Se RSI está entre 50-70 (mais neutro), e a distância do corpo é menor que 1x corpo, autorizar PUT**    - Se o RSI estiver entre 50-70 (indicando um equilíbrio técnico), e a distância do corpo da candle anterior ao atual for menor que um quarto do corpo da candle anterior, então pode ser um sinal de baixa.    - Autoriza o PUT se as condições forem atendidas.  Esta regra é baseada em números para evitar erros como missed win (MISSED_WIN) e é projetada para manter a estratégia balanceada.
+**Regra de Exceção Técnica**  Quando um robô errou ao decidir sobre um CALL (MISSED_WIN), o RSI estava em **65.75** e não havia pavio no gráfico.  Novamente, para evitar perder pontos, a regra de exceção técnica é:  **Se RSI > 80 e distância SMA < 0.13, bloquear CALL.**  Esta nova regra visa mitigar o risco de erros ao decidir sobre CALLs quando o mercado está em alta (RSI>80) e a distância entre as médias móveis é menor que 13% da volatilidade do RSI.  Aqui estão os detalhes:  - **Rigidez:** Se o RSI estiver acima de 80, isso sugere uma forte tendência para alta. - **Sensibilidade:** A distância SMA deve ser muito pequena (menos de 13% da volatilidade do RSI) para considerar a decisão de CALL como um erro.  Esta regra é baseada em números e não em frases genéricas, permitindo uma análise mais precisa e eficaz no contexto atual.
+**Regra Técnica**
+
+A regra é:
+
+- **RSI < 35**: Evite entrar em posições de compra (CALL) se o RSI estiver abaixo de 35. Isso indica que a tendência está fraca ou invertida, aumentando os riscos.
+
+**Explicação:**
+
+1. **RSI é um indicador que mede a força da tendencia do mercado. Se ele estiver abaixo de 35, isso sugere uma tendência fraca ou inversa.**
+2. **Entrar em posições de CALL (compra) com RSI < 35 aumentaria os riscos significativamente, pois o mercado está não apenas sem força, mas também tendo dificuldade para se mover.**
+
+Esta regra é baseada na observação de que quando a tendência do mercado estiver fraca ou invertida (RSI abaixo de 35), é mais seguro evitar entradas em CALLs, evitando perdas significativas e mantendo um volume relativo baixo.
+
+**Pontuação:**
+
+- **LOSS = -10 pontos**: Evitar entrar em posições de CALL quando o RSI estiver abaixo de 35.
+- **MISSED_WIN = -5 pontos**: Evitar ficar de fora dos movimentos bons, especialmente se a tendência do mercado for forte (RSI acima de 70).
+
+**Observação:**
+
+Esta regra é uma abordagem técnica simples e eficaz para minimizar os riscos em situações onde o mercado está fraco ou invertido. Ela ajuda a manter um volume relativo baixo, evitando explosões de volumes e prejuízos significativos.
+Agora que você me informou sobre o contexto técnico e as últimas 15 velas, posso criar uma regra de exceção técnica para evitar perder pontos em caso de um erro (MISSED_WIN). Baseada na análise do RSI e das condições apresentadas, a seguinte regra pode ser criada:  **Regra de Exceção:** - Se o RSI estiver abaixo de 30, bloquear qualquer CALL. - Não alterar o movimento dos ativos se houver uma distância SMA maior que 1.5% (0.07547). - Evitar a decisão de CALL quando a volatilidade for menor do que 20%.  **Explicação:** - O RSI está em 60,58, indicando um nível elevado de tendência. - A distância SMA é de 0.07547, indicando uma distância relativamente pequena (1.5%). - A volatilidade é de 0.15987, também indicando uma estabilidade moderada.  Esta regra visa evitar erros significativos ao bloquear CALLs quando o mercado está em alta e não alterar movimentos quando há um risco menor de erro, mantendo a estratégia mais segura nas condições apresentadas.
+Para criar uma regra de exceção técnica que evite perder pontos em situações específicas, analisarei o contexto técnico fornecido:  1. **RSI (Relative Strength Index)**: O RSI está em 55.14. 2. **Tendência**: A tendência é ALTA. 3. **Distância SMA (SMA Distance)**: 0.06087 4. **Volatilidade**: 0.17266  Neste contexto, a regra de exceção técnica que evita perder pontos seria:  **Se RSI > 50 e Tendência = ALTA, então PERMITA WIN (não bloqueie um PUT)**  Esta regra é baseada em números específicos do indicador RSI e da tendência. Ela permite que os robôs não bloqueiem uma tendência de alta, evitando a perda de pontos caso ocorram erros nas decisões.  **Explicação:** - **RSI > 50**: O RSI está acima do ponto médio (50), indicando tendências mais fortes. - **Tendência = ALTA**: A tendência é em direção à alta, o que aumenta a probabilidade de um WIN.  Esta regra evita o bloqueio de WINs durante períodos de forte tendência para evitar erros na decisão do robô.
+Abaixo está a regra de exceção técnica que você solicitou:  **Regra de Exceção Técnica:** - Se o RSI estiver abaixo de 45, então se bloquear um WIN (MISSED_WIN), não autorizar CALL.    Esta regra é baseada em números e visa evitar erros na tomada de decisões quando o RSI está baixo.
+**Regra de Exceção Técnica**  Se o RSI está abaixo de 30 e há um pavio superior a duas vezes o tamanho do corpo das velas mais recentes, não permita que o robô cometa erros em decisões CALL.
+Aqui está uma regra técnica que pode ajudar a minimizar perdas e maximizar o ganho:
+
+**Regra de Pontuação:**
+
+1. **MISSED_WIN = -5 pontos (Evitar ficar de fora de movimentos bons).**
+2. **LOSS = -10 pontos (Evitar a todo custo).**
+
+**Cabeçalhos da Tabela:**
+- votos_call
+- votos_put
+- terreno
+- rsi
+- atr
+- bb_width
+- dist_sma
+- vol_rel
+
+**Regra de Pontuação:**
+
+1. **MISSED_WIN = -5 pontos (Evitar ficar de fora de movimentos bons).**
+   - Se o resultado real da decisão não corresponder ao valor previsto pela IA, penalize 5 pontos.
+
+2. **LOSS = -10 pontos (Evitar a todo custo).**
+   - Se a IA errar em qualquer aspecto do seu sistema, penalize 10 pontos.
+   
+**Comentários:**
+
+- Esta regra é baseada na ideia de minimizar perdas e maximizar ganhos. Ela se concentra em duas áreas críticas:
+  
+  1. **MISSED_WIN = -5 pontos**: Evita que a IA saia do movimento de alta ou baixa quando o resultado real da decisão não corresponde ao previsto pela IA.
+  
+  2. **LOSS = -10 pontos**: Se houver qualquer erro na IA, como se ela errar em relação à estratégia, penalize 10 pontos.
+
+Esta regra é uma forma simples de otimizar a pontuação do sistema, minimizando as possíveis falhas e maximizando os resultados positivos.
+**Regra de Exceção Técnica**  - **MISSED_WIN**: Se o robô errou ao decidir sobre um CALL.  **Com base nas informações fornecidas:**  1. **RSI (Relação do Índice da Volatilidade)**:    - RSI = 61.45    - Este valor está acima de 30, indicando uma tendência ALTA.  2. **Tendência**:    - A tendencia é confirmada por um RSI acima de 30.  3. **Distância SMA (SMA)**:    - Distância SMA = 0.04256    - Este valor está dentro do padrão normal, indicando que a distância entre as médias móveis não é considerável para o contexto atual.  4. **Volatilidade**:    - Volatilidade = 0.16674    - Esta volatilidade também está abaixo da faixa normal, sugerindo uma estabilidade de mercado moderada.  **Conclusão:**  - O RSI está em um nível acima dos 30, indicando que a tendência é ALTA. - Não há evidências de pavio no histórico fornecido (distância SMA e volatilidade estão dentro do normal). - A situação não sugere uma necessidade de bloquear CALLs.  **Regra de Exceção Técnica:**  - **Se o RSI estiver acima de 30, autorizar CALL.**  Esta regra é criada para evitar erros na decisão estratégica do robô, em particular quando a tendência está confirmada e os indicadores técnicos estão em um nível normal.
+**Regra de Exceção Técnica**  Se o RSI está abaixo de **60**, bloqueie qualquer WIN (MISSED_WIN) sem exceção.  Esta regra visa evitar erros significativos em situações onde a tendência é claramente descendente, aumentando a probabilidade da correção.
+**Regra de Exceção Técnica**  Se o RSI estiver abaixo de 50 (pavio inferior ao dobro da média móvel), bloquear qualquer WIN (MISSED_WIN) para evitar perder pontos.  **Explicação:** - O RSI em baixa indica uma tendência mais forte para a alta. - Pavios menores são geralmente associados à perda de dinheiro, especialmente em condições de alta volatilidade. - Esta regra é projetada para proteger os traders contra erros de decisão.
+**Regra de Exceção Técnica**  **Situação**: O robô bloqueou um WIN (MISSED_WIN) em uma situação onde o RSI estava acima do normal.  **Caso de Aparência**: Quando o RSI está acima dos 70, mas há um pavio forte nas últimas 15 velas, indicando que a tendência está consolidada e não pode ser desafiada com certeza.  **Regra**: Se o RSI estiver acima de 70 durante as últimas 15 velas e houver um pavio forte (pavio > 2x corpo), então autorizar CALL é perigoso. Isso significa que, em situações assim, não devemos bloquear WINs para evitar perder pontos.  **Análise**: Este padrão sugere que o RSI está exagerado e indica uma tendência consolidada. Portanto, o pavio forte nos últimos 15 velas é um sinal de que a posição atual deve ser mantida ou revertida, evitando qualquer erro em favor do CALL.  **Pontuação**: -5 pontos (por ter errou ao bloquear o WIN).  **Motivação**: A regra visa prevenir os erros de decisão quando o RSI está acima dos 70 e há uma tendência consolidada. Isso ajuda a manter a consistência do sistema e evitar situações onde o robô comete erro, como ocorreu nesta ocasião.  **Conclusão**: Este padrão é um alerta para os traders que podem usar em suas estratégias de negociação para minimizar erros e melhorar sua eficiência.
+**Regra de Exceção Técnica**  - **Ratificação do Pavio**: Se a distância SMA for maior que o valor padrão (5), então é permitido o lançamento de uma operação em qualquer condição.      - **Nível RSI**: O robô deve estar no nível superior da tendência para realizar a operação, ou seja, se o Tendência estiver em ALTA, o RSI deve ser maior que 70.     - **Distância SMA**: Se a distância SMA for menor que o valor padrão (5), então é permitido o lançamento de uma operação.    - **Volatilidade**: A volatilidade deve estar abaixo do valor padrão (1), garantindo um ambiente estável para as operações.    - **MISSED_WIN**: Se a operação foi bloqueada por um WIN, então é permitido o lançamento de uma operação em qualquer condição.
+**Regra de Exceção Técnica:**  **Situação:** Se o robô bloquear um WIN (MISSED_WIN) e o RSI estiver em baixo do nível de 30 ou se houver pavio menor que dois vezes o corpo da candle, então não autorizar PUTs.  **Regra de Exceção:** - **Nível RSI:** Se RSI < 30 - **Pavio:** Se Pavio < 2x do corpo  **Resultado:** Não permita PUTs se as condições acima forem atendidas.
+**Regra Técnica:**
+
+A **regra técnica é que o preço deve se mover muito longe da Média Móvel (SMA)** para causar uma perda de pontos. Isso pode ser identificado através do seguinte critério:
+
+- Se a distância entre o preço e a SMA for maior que 10% do spread atual, isso indica um movimento significativo.
+
+**Explicação:**
+
+- **Distância da Média Móvel (SMA):** 
+  - A média móvel é uma técnica de análise que mede os dados históricos para prever o futuro.
+  - Se a distância entre o preço atual e a SMA for maior que 10% do spread, isso indica um movimento significativo.
+
+- **Método de Pontuação:**
+  - A pontuação será calculada como:
+    - LOSS = -10 pontos
+    - MISSED_WIN = -5 pontos
+
+**Regra Técnica:**
+
+Se a distância entre o preço e a SMA for maior que 10% do spread atual, então:
+
+- **LOSS = -10 pontos**
+- **MISSED_WIN = -5 pontos**
+
+**Explicação:**
+
+- Se o preço estiver muito longe da média móvel (SMA), isso pode indicar uma perda de pontuação.
+  - Por exemplo, se a distância for maior que 10% do spread atual, então:
+    - LOSS = -10 pontos
+    - MISSED_WIN = -5 pontos
+
+**Regra Técnica:**
+
+- **LOSS = -10 pontos**
+- **MISSED_WIN = -5 pontos**
+
+Este critério pode ser usado para identificar padrões que causam perda de pontos em seu sistema de pontuação.
+**Regra de Exceção Técnica**  - **Caso:** Se o RSI estiver abaixo de 30 e houver um pavio superior a dois vezes o tamanho da velha (old candle), bloquear qualquer WIN (MISSED_WIN) que possa ocorrer.  - **Regra:**     - Se RSI < 30 e pavio > 2x corpo, autorizar CALL.   Esta regra é criada para evitar perdas de pontos em situações onde o mercado está muito debilitado (RSI abaixo de 30) e há uma forte tendência descendente (pavio superior a dois vezes o tamanho da velha). A intenção é garantir que os investimentos sejam feitos com base em dados técnicos mais robustos.

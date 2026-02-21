@@ -5,6 +5,8 @@ class GerenteFinancas:
         self.valor_aposta = 2  # Defina aqui o valor da sua entrada (Min 2 BRL)
         self.saldo_inicial = None
         self.lucro_sessao = 0.0
+        self.saldo_snapshot = 0.0 # Saldo no momento exato ANTES da aposta
+        self.em_operacao = False # Trava de segurança
         self._lock = threading.Lock()
 
     def obter_saldo(self, api):
@@ -72,6 +74,28 @@ class GerenteFinancas:
                 return {"status": "ok", "novo_valor": self.valor_aposta}
         except ValueError:
             return {"erro": "Valor inválido."}
+
+    def registrar_saldo_pre_aposta(self, api):
+        """Grava o saldo exato antes do clique (antes de descontar o valor da aposta)."""
+        if api:
+            self.saldo_snapshot = api.get_balance()
+            self.em_operacao = True
+            print(f"💰 Finanças: Saldo Snapshot gravado: {self.saldo_snapshot:.2f}")
+
+    def verificar_resultado_financeiro(self, api):
+        """
+        Compara o saldo atual com o snapshot.
+        Retorna: "WIN" (Saldo aumentou), "LOSS" (Saldo diminuiu ou igual), Diff
+        """
+        if not api: return "ERROR", 0
+        
+        saldo_atual = api.get_balance()
+        diff = saldo_atual - self.saldo_snapshot
+        
+        # Se o saldo atual for MENOR que o snapshot, o dinheiro da aposta não voltou = LOSS
+        if saldo_atual < self.saldo_snapshot:
+            return "LOSS", diff
+        return "WIN", diff
 
     def autorizar_operacao(self, sinais):
         """Contabiliza votos de CALL e PUT e decide a operação"""

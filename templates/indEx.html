@@ -1293,8 +1293,38 @@
         carregarStatusTrading();
         // Primeira carga
         setTimeout(atualizarSaldo, 1000);
-        // Atualização periódica do saldo a cada 3 segundos para manter sincronizado
-        setInterval(atualizarSaldo, 3000);
+        // Atualização periódica do saldo a cada 4 segundos para manter sincronizado
+        setInterval(atualizarSaldo, 4000);
+        
+        // Atualiza o relógio a cada segundo
+    setInterval(() => {
+        fetch('/api/tempo-vela')
+            .then(response => response.json())
+            .then(data => {
+                // Cria ou atualiza um elemento para mostrar o tempo
+                let display = document.getElementById('relogio-vela');
+                if (!display) {
+                    display = document.createElement('div');
+                    display.id = 'relogio-vela';
+                    display.style.position = 'fixed';
+                    display.style.top = '10px';
+                    display.style.right = '10px';
+                    display.style.fontSize = '24px';
+                    display.style.fontWeight = 'bold';
+                    display.style.backgroundColor = 'rgba(0,0,0,0.7)';
+                    display.style.color = 'white';
+                    display.style.padding = '10px';
+                    display.style.borderRadius = '5px';
+                    display.style.zIndex = '9999';
+                    document.body.appendChild(display);
+                }
+                display.innerText = "⏳ " + data.restante + "s";
+                
+                // Muda a cor se estiver perto do fim
+                if (data.restante <= 10) display.style.color = '#ff4444'; // Vermelho
+                else display.style.color = 'white';
+            });
+    }, 1000);
     </script>
 </body>
 </html>

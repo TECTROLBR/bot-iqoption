@@ -169,7 +169,9 @@ Raw AI Response: {raw_response}
             velas_str += f"[{v['open']:.5f} {v['close']:.5f} {v['max']:.5f} {v['min']:.5f}] "
 
         prompt = f"""
-Atue como trader algorítmico.
+Atue como um trader de alta performance. Omissão é mais grave que um erro técnico.
+Sua prioridade é a exposição estatística positiva. Se RSI e Tendência estiverem alinhados, BLOCK é proibido.
+
 Indicadores: {indicadores_str}
 Price Action (3 velas): {velas_str}
 Sinal: {sinal}
@@ -208,15 +210,21 @@ class StudentSLM:
     1. Classifica o Terreno (Asfalto, Lama, Buracos).
     2. Estuda o histórico recente e gera regras dinâmicas.
     """
-    def __init__(self):
+    def __init__(self, groq_api_key=None):
         self.arquivo_dados = "brain_training_data.csv"
         self.arquivo_regras = "regras_dinamicas.txt"
         self.regra_atual = "Nenhuma regra definida ainda. Opere com cautela."
         self.ollama_url = "http://localhost:11434/api/generate"
-        self.model = "qwen2.5:1.5b" # Modelo leve sugerido
+        self.model = "llama3.2:1b" # Modelo leve (Llama 3.2 1B)
         self._lock = threading.Lock()
         self._ollama_lock = threading.Lock()
         self.regras_dinamicas = self._carregar_regras()
+        self.rule_miss_counter = {} # Novo: Contador de erros por regra
+        
+        # Inicializa Groq para o Tribunal (Anti-Medo)
+        self.groq_client = None
+        if groq_api_key:
+            self.groq_client = Groq(api_key=groq_api_key)
 
     def classificar_terreno(self, contexto):
         """
@@ -249,8 +257,12 @@ class StudentSLM:
     def estudar_professor(self):
         """Lê o histórico e gera regra via Ollama."""
         if not os.path.exists(self.arquivo_dados): return
+        
+        if not self.groq_client:
+            print("⚠️ ERRO: Groq não conectado. A Aluna está proibida de criar regras sozinha.")
+            return
 
-        print("🎓 IA Aluna: Iniciando estudo do diário de trades (Ollama)...")
+        print("⚖️ TRIBUNAL (Groq): Iniciando auditoria do diário de trades...")
         try:
             with self._lock: # Protege a leitura para evitar conflito com a gravação de trades
                 with open(self.arquivo_dados, "r", encoding="utf-8") as f:
@@ -261,37 +273,44 @@ class StudentSLM:
 
             csv_texto = "".join(dados_recentes)
             prompt = f"""
-Analise este histórico de trades (CSV):
+Você é o "Tribunal de Regras". A IA local (Aluna) está tentando burlar o sistema criando regras impossíveis (como volume negativo) para não operar.
+Sua missão é criar uma regra TÉCNICA, MATEMATICAMENTE VÁLIDA e AGRESSIVA para corrigir isso.
+
+DADOS (CSV):
 {csv_texto}
+Colunas: votos_call,votos_put,terreno,rsi,atr,bb_width,dist_sma,vol_rel,decisao_ia,resultado_real.
 
-O cabeçalho é: votos_call,votos_put,terreno,rsi,atr,bb_width,dist_sma,vol_rel,decisao_ia,resultado_real.
-Novas métricas:
-- dist_sma: Distância do preço para a Média Móvel (Se muito alto/baixo, preço esticou).
-- vol_rel: Volume Relativo (Acima de 1.0 = Volume alto/Explosão).
+REGRAS DE FÍSICA DE MERCADO (NÃO VIOLE):
+1. Volume Relativo (vol_rel) é SEMPRE POSITIVO (> 0). Nunca use < 0.
+2. RSI é entre 0 e 100. RSI < 30 é Sobrevenda (Oportunidade), não apenas "baixa volatilidade".
+3. Omissão (MISSED_WIN) é inaceitável.
 
-Sistema de Pontuação:
-LOSS = -10 pontos (Evitar a todo custo).
-MISSED_WIN = -5 pontos (Evitar ficar de fora de movimentos bons).
+Gere APENAS UM JSON com a regra. Sem explicações, sem "redações".
+Exemplo JSON: {{"regra": "Se RSI < 30 e vol_rel > 1.2, autorizar CALL"}}
 
-Identifique padrões que causam perda de pontos.
-Gere UMA regra técnica baseada em NÚMEROS (Ex: RSI > 70) para maximizar a pontuação.
-NÃO use frases genéricas como "não ter prejuízo". Seja técnico.
-Regra:
+A regra deve focar em AUTORIZAR (Exposição Positiva).
 """
             
-            payload = {
-                "model": self.model, "prompt": prompt, "stream": False,
-                "options": {"temperature": 0.3, "num_ctx": 2048}
-            }
+            chat_completion = self.groq_client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile",
+                temperature=0.2, # Baixa temperatura para precisão matemática
+            )
             
-            # Aumentado para 900s (15 min) para evitar erro de Timeout com DeepSeek
-            with self._ollama_lock:
-                response = requests.post(self.ollama_url, json=payload, timeout=900)
-            if response.status_code == 200:
-                nova_regra = response.json().get("response", "").strip()
+            response_content = chat_completion.choices[0].message.content
+            
+            # Extração de JSON robusta
+            import json
+            start = response_content.find('{')
+            end = response_content.rfind('}') + 1
+            if start != -1 and end != -1:
+                json_str = response_content[start:end]
+                data = json.loads(json_str)
+                nova_regra = data.get("regra", "").strip()
+                
                 if nova_regra:
                     self.regra_atual = nova_regra
-                    print(f"🎓 IA Aluna (Nova Regra): {self.regra_atual}")
+                    print(f"⚖️ TRIBUNAL (Nova Lei): {self.regra_atual}")
                     
                     # Salva a regra aprendida no arquivo permanente
                     with self._lock:
@@ -307,13 +326,63 @@ Regra:
         if not os.path.exists(self.arquivo_regras): return []
         try:
             with open(self.arquivo_regras, "r", encoding="utf-8") as f:
-                return [line.strip() for line in f.readlines() if line.strip()]
+                regras_filtradas = []
+                forbidden_phrases = ["bloquear qualquer win", "sem exceção", "bloqueie qualquer win"]
+                for line in f:
+                    regra = line.strip()
+                    if regra and not any(phrase in regra.lower() for phrase in forbidden_phrases):
+                        regras_filtradas.append(regra)
+                return regras_filtradas
         except: return []
+
+    def _purge_rule(self, rule_to_delete):
+        """Deleta uma regra do arquivo e da memória."""
+        if not rule_to_delete: return
+        
+        print(f"🔥 SUPERVISOR: Purgando regra irracional -> '{rule_to_delete}'")
+        
+        # Remove from memory
+        self.regras_dinamicas = [r for r in self.regras_dinamicas if r != rule_to_delete]
+        
+        # Remove from counter
+        if rule_to_delete in self.rule_miss_counter:
+            del self.rule_miss_counter[rule_to_delete]
+            
+        # Remove from file
+        try:
+            with self._lock:
+                with open(self.arquivo_regras, "w", encoding="utf-8") as f:
+                    for rule in self.regras_dinamicas:
+                        f.write(f"{rule}\n")
+        except Exception as e:
+            print(f"🚨 Erro ao purgar regra do arquivo: {e}")
+
+    def penalize_rule_for_miss(self):
+        """Penaliza a regra atual por um MISSED_WIN."""
+        rule = self.regra_atual
+        if not rule or "Nenhuma regra" in rule: return
+        
+        current_misses = self.rule_miss_counter.get(rule, 0) + 1
+        self.rule_miss_counter[rule] = current_misses
+        
+        print(f"⚠️ Supervisor: Regra '{rule[:50]}...' gerou um MISSED_WIN. Contagem: {current_misses}/3.")
+        
+        if current_misses >= 3:
+            self._purge_rule(rule)
+
+    def reward_rule_for_block(self):
+        """Reseta o contador de erro de uma regra se ela acertou um bloqueio."""
+        rule = self.regra_atual
+        if rule and rule in self.rule_miss_counter:
+            print(f"✅ Supervisor: Regra '{rule[:50]}...' acertou um bloqueio. Contador de erros resetado.")
+            self.rule_miss_counter[rule] = 0
 
     def obter_regras_formatadas(self):
         """Retorna as últimas 3 regras aprendidas para injetar no prompt."""
-        if not self.regras_dinamicas: return "Nenhuma regra extra."
-        return " | ".join(self.regras_dinamicas[-3:])
+        forbidden_phrases = ["bloquear qualquer win", "sem exceção", "bloqueie qualquer win"]
+        regras_validas = [r for r in self.regras_dinamicas if not any(phrase in r.lower() for phrase in forbidden_phrases)]
+        if not regras_validas: return "Nenhuma regra extra."
+        return " | ".join(regras_validas[-3:])
 
     def validar_sinal_local(self, sinal, contexto, historico_recente):
         """
@@ -329,17 +398,24 @@ Regra:
         
         # Prompt direto e objetivo para o modelo local (DeepSeek/Llama)
         prompt = f"""
-Atue como Gerente de Risco Sênior.
-Sinal Indicado: {sinal}
-Cenário Técnico:
-- Terreno: {terreno}
-- Tendência: {tendencia}
-- RSI: {rsi:.1f}
-- Regra Atual Aprendida: {self.regra_atual}
+Atue como Trader Especialista. Foco: Exposição Positiva.
 
-Analise o risco. Se o terreno for 'BURACOS' ou 'LAMA', seja conservador.
-Responda EXATAMENTE neste formato JSON:
-{{"decision": "PROCEED" ou "BLOCK", "reason": "motivo curto"}}
+Sinal: {sinal} | Terreno: {terreno} | Tendência: {tendencia} | RSI: {rsi:.1f}
+
+Escolha a Expiração (min): [0.5, 0.75, 1, 2, 3, 5].
+- 0.5/0.75: Scalping (Rápido/Asfalto).
+- 1/2: Normal.
+- 3/5: Tendência com ruído (Lama/Buracos).
+
+Decisão: "PROCEED" ou "BLOCK".
+Se RSI e Tendência concordam, DEVE ser PROCEED.
+
+Responda APENAS JSON:
+{{
+  "decision": "PROCEED",
+  "reason": "Tendencia favoravel",
+  "expiration": 1
+}}
 """
         try:
             payload = {
@@ -357,22 +433,36 @@ Responda EXATAMENTE neste formato JSON:
                 finally:
                     self._ollama_lock.release()
             else:
-                return {"decision": "BLOCK", "source": "OLLAMA_BUSY", "reason": "IA Ocupada (Limitado a 1 thread)"}
+                return {"decision": "BLOCK", "source": "OLLAMA_BUSY", "reason": "IA Ocupada (Limitado a 1 thread)", "expiration": 1}
 
             if response.status_code == 200:
                 resp_json = response.json().get("response", "")
                 dados = json.loads(resp_json)
-                return {"decision": dados.get("decision", "BLOCK"), "source": "OLLAMA_LOCAL", "reason": dados.get("reason", "Análise Local")}
+                # Adiciona source e fallbacks para garantir integridade
+                dados["source"] = "OLLAMA_LOCAL"
+                if "decision" not in dados: dados["decision"] = "BLOCK"
+                if "reason" not in dados: dados["reason"] = "Análise Local"
+                if "expiration" not in dados: dados["expiration"] = 1 # Fallback de 1 minuto
+                return dados
         except Exception as e:
             print(f"🚨 Erro na Aluna Local: {e}")
-            return {"decision": "BLOCK", "source": "LOCAL_ERROR", "reason": "Ollama indisponível"}
+            return {"decision": "BLOCK", "source": "LOCAL_ERROR", "reason": "Ollama indisponível", "expiration": 1}
         
-        return {"decision": "BLOCK", "source": "LOCAL_DEFAULT", "reason": "Incerteza da IA Local"}
+        return {"decision": "BLOCK", "source": "LOCAL_DEFAULT", "reason": "Incerteza da IA Local", "expiration": 1}
+
+    def registrar_resultado_operacao(self, sinal, resultado, lucro):
+        """
+        Registra o resultado de uma operação real (PROCEED).
+        """
+        if resultado == "WIN":
+            print(f"🎉 IA Aluna: Acertei! Operação de {sinal} deu WIN (+{lucro}).")
+        else:
+            print(f"💔 IA Aluna: Errei. Operação de {sinal} deu LOSS ({lucro}).")
 
     def refletir_sobre_erro(self, tipo_erro, sinal, contexto, historico_velas):
         """
-        Motor de Auto-Reflexão: Analisa erros (MISSED_WIN ou PROCEED_LOSS)
-        e gera novas regras de exceção usando a IA Local.
+        Motor de Auto-Reflexão: Analisa erros (MISSED_WIN ou PROCEED_LOSS).
+        Se for MISSED_WIN, usa o Tribunal Groq para gerar regras de CORAGEM.
         """
         print(f"🤔 IA Aluna: Refletindo sobre erro {tipo_erro} em {sinal}...")
         
@@ -389,23 +479,79 @@ Responda EXATAMENTE neste formato JSON:
         for v in historico_velas:
             hist_str += f"[{v['open']:.4f}, {v['close']:.4f}, {v['max']:.4f}, {v['min']:.4f}] "
 
+        # --- TRIBUNAL GROQ (ANTI-MEDO) ---
+        if self.groq_client and (tipo_erro == "MISSED_WIN" or tipo_erro == "PROCEED_LOSS"):
+            # Calcula corpo da última vela
+            last_candle = historico_velas[-1] if historico_velas else {'open':0, 'close':0}
+            corpo_candle = abs(last_candle['close'] - last_candle['open'])
+
+            if tipo_erro == "MISSED_WIN":
+                prompt_groq = f"""
+Analise este erro de MISSED_WIN (ganho perdido por medo).
+Dados: RSI={rsi:.2f}, Tendência={tendencia}, Candle={corpo_candle:.5f}.
+Retorne APENAS uma regra técnica em formato JSON.
+PROIBIDO usar as palavras 'bloquear', 'evitar' ou 'cautela'.
+O foco é EXPOSIÇÃO POSITIVA. Se os indicadores X e Y ocorrerem, você DEVE autorizar.
+Exemplo JSON: {{"regra": "Se RSI < 30 e Tendência for BAIXA, autorizar PUT"}}
+"""
+            else: # PROCEED_LOSS
+                prompt_groq = f"""
+Analise este erro de PROCEED_LOSS (Prejuízo Real).
+Você autorizou {sinal} e o mercado foi contra.
+Dados: RSI={rsi:.2f}, Tendência={tendencia}, Candle={corpo_candle:.5f}, DistSMA={dist_sma:.5f}.
+Defina uma NOVA REGRA TÉCNICA para corrigir essa falha.
+A regra deve definir uma condição MAIS ESTRITA para autorizar {sinal} ou autorizar o movimento oposto se for o caso.
+Foco: EXPOSIÇÃO POSITIVA (Autorizar o certo).
+Retorne APENAS JSON: {{"regra": "Se RSI > X e ... autorizar ..."}}
+"""
+
+            try:
+                print(f"⚖️ IA Aluna: Consultando Tribunal (Groq) sobre {tipo_erro}...")
+                chat_completion = self.groq_client.chat.completions.create(
+                    messages=[{"role": "user", "content": prompt_groq}],
+                    model="llama-3.3-70b-versatile",
+                    temperature=0.3,
+                )
+                response = chat_completion.choices[0].message.content
+                
+                import json
+                start = response.find('{')
+                end = response.rfind('}') + 1
+                if start != -1 and end != -1:
+                    json_str = response[start:end]
+                    data = json.loads(json_str)
+                    nova_regra = data.get("regra", "").strip()
+                    
+                    if nova_regra:
+                        with self._lock:
+                            self.regras_dinamicas.append(nova_regra)
+                            with open(self.arquivo_regras, "a", encoding="utf-8") as f:
+                                f.write(f"{nova_regra}\n")
+                        self.regra_atual = nova_regra
+                        print(f"🦁 IA Aluna (Groq): Nova Regra Aprendida -> {nova_regra}")
+                return
+            except Exception as e:
+                print(f"🚨 Erro no Tribunal Groq: {e}")
+                return
+
         prompt_reflexao = f"""
-Você é um trader algorítmico.
-Sistema de Pontuação:
-LOSS = -10 pontos.
-MISSED_WIN = -5 pontos.
+Analise o erro: {tipo_erro} em {sinal}.
+Dados: RSI={rsi:.2f}, Tendência={tendencia}, Dist={dist_sma:.4f}.
+Histórico: {hist_str}
 
-Erro: {tipo_erro} (O robô errou ao decidir sobre um {sinal}).
-Contexto Técnico: RSI={rsi:.2f}, Tendência={tendencia}, Distância SMA={dist_sma:.5f}, Volatilidade={bb_width:.5f}.
-Últimas 15 velas: {hist_str}
+"""
+        # --- SUPERVISOR DE VIES (FILTRO DE SANIDADE) ---
+        if tipo_erro == "MISSED_WIN":
+            if (sinal == "CALL" and rsi < 40) or (sinal == "PUT" and rsi > 60):
+                alerta_covardia = "ALERTA DE COVARDIA: O bloqueio foi contra indicadores óbvios (RSI em zona de reversão). Crie uma regra AGRESSIVA para autorizar a operação em cenários similares. PROCEED é a prioridade."
+                prompt_reflexao += f"\nAVISO DO SUPERVISOR: {alerta_covardia}\n"
 
-Se bloqueou um WIN (MISSED_WIN), analise: o RSI estava em que nível? Teve pavio?
-Crie uma regra de exceção técnica baseada em NÚMEROS para evitar perder pontos.
-NÃO use frases genéricas.
-Exemplo: "Se RSI < 30 e pavio > 2x corpo, autorizar CALL."
+        prompt_reflexao += """
+Crie uma regra técnica CURTA para evitar este erro.
+Formato: "Se RSI < X e ... autorizar ..."
+NÃO explique. Apenas a regra.
 Nova Regra:
 """
-        
         try:
             payload = {
                 "model": self.model, 

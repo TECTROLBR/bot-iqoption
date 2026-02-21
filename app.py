@@ -32,6 +32,7 @@ cache_ativos_otc = []
 trading_enabled = False # Começa desligado por segurança (Vermelho)
 ultima_vela_analisada = None
 tipo_opcao = 'BLITZ' # 'BLITZ' (Binária/Turbo) ou 'DIGITAL'
+window = None # Referência global para a janela
 
 # --- SHADOW TRACKING (RASTREAMENTO FANTASMA) ---
 # Placar de Validação da IA
@@ -42,7 +43,7 @@ consecutive_errors = 0 # Contador para recalibração de humor da IA
 gerente_estrategia = GerenteEstrategia()
 gerente_financas = GerenteFinancas()
 ia_brain = BrainAI(api_key=os.getenv("GROQ_API_KEY")) # Carrega a chave do ambiente (bot_load.bat)
-ia_aluna = StudentSLM() # Inicializa a IA Local (SLM)
+ia_aluna = StudentSLM(groq_api_key=os.getenv("GROQ_API_KEY")) # Inicializa a IA Local com acesso ao Tribunal Groq
 
 def conectar_api():
     global api
@@ -99,31 +100,65 @@ def loop_checagem_resultados():
                         fechada = True
                 
                 if fechada:
-                    win = lucro > 0
-                    print(f"Ordem {ordem['id']} ({tipo}) finalizada. Lucro: {lucro}")
+                    print(f"Ordem {ordem['id']} ({tipo}) finalizada na API. Verificando saldo...")
+                    
+                    # Delay de segurança para a corretora atualizar o saldo
+                    time.sleep(1.5) 
+                    
+                    # --- VERIFICAÇÃO FINANCEIRA SUPREMA ---
+                    # Ignora o status da API e olha para o dinheiro na conta
+                    status_financeiro, diff_real = gerente_financas.verificar_resultado_financeiro(api)
+                    win = (status_financeiro == "WIN")
+                    
+                    print(f"💰 Auditoria Financeira: {status_financeiro} (Diferença: {diff_real:.2f})")
                     
                     # Notifica o Gerente de Estratégias (Auditoria do Analista)
-                    for nome_st in ordem.get('estrategias', []):
-                        gerente_estrategia.notificar_resultado_api(nome_st, win, lucro)
+                    # for nome_st in ordem.get('estrategias', []):
+                    #    gerente_estrategia.notificar_resultado_api(nome_st, win, lucro)
                     
                     # --- TREINAMENTO PARALELO (ML) ---
                     if 'contexto_ml' in ordem:
-                        resultado_real = "WIN" if win else "LOSS"
+                        resultado_real = status_financeiro # WIN ou LOSS baseado no saldo
                         # Salva telemetria rica para a Aluna estudar
                         terreno_op = ordem['contexto_ml'].get('terreno', 'DESCONHECIDO')
                         contexto_tecnico_op = ordem.get('contexto_tecnico', {})
                         ia_aluna.registrar_telemetria(ordem['contexto_ml'], contexto_tecnico_op, ordem['contexto_ml']['decisao_groq'], resultado_real, terreno_op)
-                        print(f"📝 Aprendizado Registrado: ID {ordem['id']} | Decisão IA: {ordem['contexto_ml']['decisao_groq']} | Resultado: {resultado_real}")
+                        
+                        # --- FEEDBACK IMEDIATO (VERIFICAÇÃO) ---
+                        ia_aluna.registrar_resultado_operacao(ordem.get('sinal'), resultado_real, diff_real)
+                        if win:
+                            ia_brain.log_pensamento(f"✅ Validação: Saldo aumentou! (+{diff_real:.2f})")
+                        else:
+                            ia_brain.log_pensamento(f"❌ PUNIÇÃO: Saldo diminuiu ({diff_real:.2f}). Acionando Tribunal.")
+                        
+                        print(f"📝 Aprendizado Registrado: ID {ordem['id']} | Resultado Financeiro: {resultado_real}")
 
                         # --- AUTO-REFLEXÃO (PROCEED_LOSS) ---
                         if not win:
                             threading.Thread(target=ia_aluna.refletir_sobre_erro, args=("PROCEED_LOSS", ordem.get('sinal', 'UNKNOWN'), contexto_tecnico_op, list(historico_velas)[-15:])).start()
                         
                     ordens_em_andamento.remove(ordem)
+                    
+                    # Libera a trava para a próxima operação
+                    gerente_financas.em_operacao = False
             except Exception as e:
                 print(f"Erro ao checar ordem {ordem['id']}: {e}")
+                # Em caso de erro crítico, libera a trava para não congelar o bot
+                gerente_financas.em_operacao = False
         
-        time.sleep(2) # Verifica a cada 2 segundos
+        # Mostra relógio no console (Feedback visual)
+        if api:
+            ts = api.get_server_timestamp()
+            restante = 60 - (ts % 60)
+            print(f"\r⏳ Vela fecha em: {restante}s | Ordens: {len(ordens_em_andamento)}   ", end="")
+            
+            # Atualiza o título da janela (Feedback Visual na Tela de Status)
+            if window:
+                try:
+                    window.set_title(f"Tela de Status | ⏳ Vela: {restante}s | 📉 Ordens: {len(ordens_em_andamento)}")
+                except: pass
+        
+        time.sleep(1) # Verifica a cada 1 segundo (Melhor para o relógio)
 
 def loop_atualizacao_velas():
     """
@@ -183,13 +218,17 @@ def loop_atualizacao_velas():
                                     if fechamento_atual < entrada:
                                         score_ia['acertos_bloqueio'] += 1
                                         ia_brain.log_pensamento(f"✅ Validação: Bloqueio de CALL correto. Preço caiu (Loss evitado).")
-                                        consecutive_errors = 0 # Reset: IA acertou
-                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "LOSS", contexto_ml_bloqueio.get('terreno'))
+                                        consecutive_errors = 0
+                                        if contexto_ml_bloqueio:
+                                            ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "LOSS", contexto_ml_bloqueio.get('terreno'))
+                                            ia_aluna.reward_rule_for_block() # Supervisor: Recompensa regra
                                     elif fechamento_atual > entrada:
                                         score_ia['erros_bloqueio'] += 1
                                         ia_brain.log_pensamento(f"❌ Validação: Bloqueio de CALL incorreto. Preço subiu (Win perdido).")
-                                        consecutive_errors += 1 # Erro: IA foi medrosa
-                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "WIN", contexto_ml_bloqueio.get('terreno'))
+                                        consecutive_errors += 1
+                                        if contexto_ml_bloqueio:
+                                            ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "WIN", contexto_ml_bloqueio.get('terreno'))
+                                            ia_aluna.penalize_rule_for_miss() # Supervisor: Penaliza regra
                                         # Aciona Auto-Reflexão (MISSED_WIN)
                                         threading.Thread(target=ia_aluna.refletir_sobre_erro, args=("MISSED_WIN", "CALL", contexto_do_bloqueio, list(historico_velas)[-15:])).start()
                                 
@@ -198,17 +237,26 @@ def loop_atualizacao_velas():
                                     if fechamento_atual > entrada:
                                         score_ia['acertos_bloqueio'] += 1
                                         ia_brain.log_pensamento(f"✅ Validação: Bloqueio de PUT correto. Preço subiu (Loss evitado).")
-                                        consecutive_errors = 0 # Reset: IA acertou
-                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "LOSS", contexto_ml_bloqueio.get('terreno'))
+                                        consecutive_errors = 0
+                                        if contexto_ml_bloqueio:
+                                            ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "LOSS", contexto_ml_bloqueio.get('terreno'))
+                                            ia_aluna.reward_rule_for_block() # Supervisor: Recompensa regra
                                     elif fechamento_atual < entrada:
                                         score_ia['erros_bloqueio'] += 1
                                         ia_brain.log_pensamento(f"❌ Validação: Bloqueio de PUT incorreto. Preço caiu (Win perdido).")
-                                        consecutive_errors += 1 # Erro: IA foi medrosa
-                                        if contexto_ml_bloqueio: ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "WIN", contexto_ml_bloqueio.get('terreno'))
+                                        consecutive_errors += 1
+                                        if contexto_ml_bloqueio:
+                                            ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "WIN", contexto_ml_bloqueio.get('terreno'))
+                                            ia_aluna.penalize_rule_for_miss() # Supervisor: Penaliza regra
                                         # Aciona Auto-Reflexão (MISSED_WIN)
                                         threading.Thread(target=ia_aluna.refletir_sobre_erro, args=("MISSED_WIN", "PUT", contexto_do_bloqueio, list(historico_velas)[-15:])).start()
                             
                             bloqueios_pendentes = [] # Limpa a fila após validar
+
+                        # --- TRAVA DE SEGURANÇA FINANCEIRA ---
+                        if gerente_financas.em_operacao:
+                            print(f"\r⏳ Aguardando atualização de saldo da operação anterior...", end="")
+                            continue # Pula todo o resto e volta para o início do loop
 
                         # Processa estratégias e verifica se houve sinal de entrada
                         lista_sinais, contexto_atual, resultados_finalizados = gerente_estrategia.processar(list(historico_velas))
@@ -239,7 +287,7 @@ def loop_atualizacao_velas():
                         
                         if resultado_op:
                             sinal = resultado_op['sinal']
-                            expiracao = resultado_op['expiracao']
+                            # A expiração agora é decidida pela IA Aluna. O valor de resultado_op['expiracao'] é ignorado.
                             estrategias_ativas = resultado_op['estrategias']
                             
                             # --- LÓGICA DE RECALIBRAÇÃO (MEMÓRIA CURTA) ---
@@ -276,27 +324,46 @@ def loop_atualizacao_velas():
                                 else: # GROQ_API, API_ERROR, etc.
                                     print(f"🛑 Bloqueio Técnico/Erro: {reason}.")
 
-                                # Registra para validação na próxima vela (Shadow Tracking)
-                                bloqueios_pendentes.append({
-                                    "sinal": sinal,
-                                    "preco_entrada": list(historico_velas)[-1]['close'], # Preço de fechamento da vela que gerou o sinal
-                                    "horario": list(historico_velas)[-1]['horario_formatado'],
-                                    "contexto": contexto_atual, # Salva o contexto do momento do bloqueio
-                                    "contexto_ml": contexto_ml_atual # Salva dados para ML
-                                })
-                                # Libera as estratégias que votaram para não ficarem presas
+                                # FIX: Ignora bloqueios causados por erro de API para não sujar o aprendizado
+                                if "ERROR" not in source and "BUSY" not in source and "NO_API" not in source:
+                                    # Registra para validação na próxima vela (Shadow Tracking)
+                                    bloqueios_pendentes.append({
+                                        "sinal": sinal,
+                                        "preco_entrada": list(historico_velas)[-1]['close'], # Preço de fechamento da vela que gerou o sinal
+                                        "horario": list(historico_velas)[-1]['horario_formatado'],
+                                        "contexto": contexto_atual, # Salva o contexto do momento do bloqueio
+                                        "contexto_ml": contexto_ml_atual # Salva dados para ML
+                                    })
+                                else:
+                                    print(f"⚠️ Bloqueio ignorado para fins de estatística (Origem: {source})")
+
+                                # Libera as estratégias que votaram
                                 gerente_estrategia.processar_resultado_votacao([])
                             else: # PROCEED
-                                exp_txt = f"{int(expiracao*60)}s" if expiracao < 1 else f"{int(expiracao)}m"
+                                # A IA decide a expiração. Usamos 1 minuto como fallback se a chave não existir.
+                                expiracao_ia = parecer_obj.get("expiration", 1)
+
+                                exp_txt = f"{int(expiracao_ia*60)}s" if expiracao_ia < 1 else f"{int(expiracao_ia)}m"
+                                print(f"🧠 IA Aluna definiu expiração: {exp_txt}")
                                 print(f"SINAL CONFIRMADO PELA IA: {sinal} - Enviando ordem ({tipo_opcao} / {exp_txt})...")
 
                                 if trading_enabled:
                                     check, order_id = False, None
                                     
                                     if tipo_opcao == 'DIGITAL':
-                                        check, order_id = api.buy_digital_spot(ativo_atual, gerente_financas.valor_aposta, sinal.lower(), expiracao)
+                                        # Digital API requer minutos inteiros (1, 5, 15). Arredondamos para o mais próximo, mínimo 1.
+                                        # Grava saldo ANTES de enviar a ordem
+                                        gerente_financas.registrar_saldo_pre_aposta(api)
+                                        
+                                        exp_digital = max(1, int(round(expiracao_ia)))
+                                        if exp_digital != expiracao_ia:
+                                            print(f"   (Ajustado para Digital: {exp_digital}m)")
+                                        check, order_id = api.buy_digital_spot(ativo_atual, gerente_financas.valor_aposta, sinal.lower(), exp_digital)
                                     else: # BLITZ ou BINARY
-                                        check, order_id = api.buy(gerente_financas.valor_aposta, ativo_atual, sinal.lower(), expiracao)
+                                        # Grava saldo ANTES de enviar a ordem
+                                        gerente_financas.registrar_saldo_pre_aposta(api)
+                                        
+                                        check, order_id = api.buy(gerente_financas.valor_aposta, ativo_atual, sinal.lower(), expiracao_ia)
 
                                     if check:
                                         print(f"Ordem executada! ID: {order_id}")
@@ -313,10 +380,12 @@ def loop_atualizacao_velas():
                                         gerente_estrategia.processar_resultado_votacao(estrategias_ativas)
                                     else:
                                         print(f"Erro na ordem: {order_id}")
+                                        gerente_financas.em_operacao = False # Destrava se falhou o envio
                                         # Se falhou o envio, libera todas as estratégias
                                         gerente_estrategia.processar_resultado_votacao([])
                                 else:
                                     print(f"SIMULAÇÃO: Sinal {sinal} detectado, mas Trading está OFF. Apenas analisando.")
+                                    # Na simulação não travamos o financeiro pois não gasta saldo
                                     # Anexa o contexto de ML nas estratégias para logar o resultado simulado na próxima vela
                                     for strat_name in estrategias_ativas:
                                         gerente_estrategia.estrategias[strat_name]['contexto_ml'] = contexto_ml_atual
@@ -413,6 +482,14 @@ def get_ia_mensagens():
     """Retorna mensagens de log da IA Groq."""
     msgs = ia_brain.obter_mensagens()
     return jsonify(msgs)
+
+@app.route('/api/tempo-vela')
+def get_tempo_vela():
+    """Retorna o tempo restante para o fechamento da vela de 1 minuto."""
+    if not api: return jsonify({"restante": 0})
+    ts = api.get_server_timestamp()
+    restante = 60 - (ts % 60)
+    return jsonify({"restante": restante})
 
 @app.route('/api/historico')
 def get_historico():
@@ -575,5 +652,5 @@ if __name__ == '__main__':
     threading.Thread(target=loop_estudo_aluna, daemon=True).start()
 
     # Cria a janela nativa da aplicação
-    webview.create_window('Tela de Status', 'http://127.0.0.1:5000', width=1000, height=700)
+    window = webview.create_window('Tela de Status', 'http://127.0.0.1:5000', width=1000, height=700)
     webview.start()

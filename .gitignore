@@ -1,7 +1,3 @@
 __pycache__/
 *.pyc
-*.log
-estatisticas.json
-brain_training_data.csv
 bot_load.bat
-student_model.pkl

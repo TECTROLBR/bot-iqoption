@@ -1,6 +1,5 @@
 Flask
 pywebview
-iqoptionapi
+requests
 groq
-pandas
-scikit-learn
+https://github.com/Lu-Yi-Hsun/iqoptionapi/archive/master.zip

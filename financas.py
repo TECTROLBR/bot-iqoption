@@ -1,12 +1,11 @@
 import threading
+from websocket._exceptions import WebSocketConnectionClosedException
 
 class GerenteFinancas:
     def __init__(self):
         self.valor_aposta = 2  # Defina aqui o valor da sua entrada (Min 2 BRL)
         self.saldo_inicial = None
         self.lucro_sessao = 0.0
-        self.saldo_snapshot = 0.0 # Saldo no momento exato ANTES da aposta
-        self.em_operacao = False # Trava de segurança
         self._lock = threading.Lock()
 
     def obter_saldo(self, api):
@@ -14,15 +13,20 @@ class GerenteFinancas:
         if not api:
             return {"erro": "API desconectada"}
 
-        # Pega o saldo da conta ativa
-        saldo = api.get_balance()
-        
-        # Validação de segurança: se a API ainda não carregou o saldo
-        if saldo is None:
-            return {"erro": "Saldo indisponível"}
+        try:
+            # Pega o saldo da conta ativa
+            saldo = api.get_balance()
             
-        # Descobre qual modo está ativo (PRACTICE ou REAL)
-        modo = api.get_balance_mode()
+            # Validação de segurança: se a API ainda não carregou o saldo
+            if saldo is None:
+                return {"erro": "Saldo indisponível, reconectando..."}
+                
+            # Descobre qual modo está ativo (PRACTICE ou REAL)
+            modo = api.get_balance_mode()
+        except WebSocketConnectionClosedException:
+            return {"erro": "Conexão perdida. Tentando reconectar..."}
+        except Exception as e:
+            return {"erro": f"Erro inesperado no saldo: {e}"}
 
         with self._lock:
             # Se for a primeira vez rodando (ou após troca de conta), define o marco inicial
@@ -46,11 +50,16 @@ class GerenteFinancas:
         if not api:
             return {"erro": "API desconectada"}
 
-        api.change_balance(tipo)
-        with self._lock:
-            # Reseta o saldo inicial para recalcular o lucro baseada na nova conta
-            self.saldo_inicial = None
-        return self.obter_saldo(api)
+        try:
+            api.change_balance(tipo)
+            with self._lock:
+                # Reseta o saldo inicial para recalcular o lucro baseada na nova conta
+                self.saldo_inicial = None
+            return self.obter_saldo(api)
+        except WebSocketConnectionClosedException:
+            return {"erro": "Conexão perdida ao trocar de conta."}
+        except Exception as e:
+            return {"erro": f"Erro ao trocar conta: {e}"}
 
     def validar_gestao_risco(self, valor, saldo):
         """Verifica se o valor da aposta respeita o gerenciamento"""
@@ -74,60 +83,3 @@ class GerenteFinancas:
                 return {"status": "ok", "novo_valor": self.valor_aposta}
         except ValueError:
             return {"erro": "Valor inválido."}
-
-    def registrar_saldo_pre_aposta(self, api):
-        """Grava o saldo exato antes do clique (antes de descontar o valor da aposta)."""
-        if api:
-            self.saldo_snapshot = api.get_balance()
-            self.em_operacao = True
-            print(f"💰 Finanças: Saldo Snapshot gravado: {self.saldo_snapshot:.2f}")
-
-    def verificar_resultado_financeiro(self, api):
-        """
-        Compara o saldo atual com o snapshot.
-        Retorna: "WIN" (Saldo aumentou), "LOSS" (Saldo diminuiu ou igual), Diff
-        """
-        if not api: return "ERROR", 0
-        
-        saldo_atual = api.get_balance()
-        diff = saldo_atual - self.saldo_snapshot
-        
-        # Se o saldo atual for MENOR que o snapshot, o dinheiro da aposta não voltou = LOSS
-        if saldo_atual < self.saldo_snapshot:
-            return "LOSS", diff
-        return "WIN", diff
-
-    def autorizar_operacao(self, sinais):
-        """Contabiliza votos de CALL e PUT e decide a operação"""
-        if not sinais:
-            return None
-            
-        # Extrai direções e expirações
-        votos_call = 0
-        votos_put = 0
-        exps_call = []
-        exps_put = []
-        strats_call = []
-        strats_put = []
-
-        for s in sinais:
-            if s['sinal'] == "CALL":
-                votos_call += 1
-                exps_call.append(s['expiracao'])
-                strats_call.append(s['nome']) # Guarda nome da estratégia
-            elif s['sinal'] == "PUT":
-                votos_put += 1
-                exps_put.append(s['expiracao'])
-                strats_put.append(s['nome'])
-        
-        if votos_call > votos_put:
-            print(f"--- VOTAÇÃO VENCIDA POR CALL ({votos_call} vs {votos_put}) ---")
-            return {"sinal": "CALL", "expiracao": max(exps_call), "estrategias": strats_call}
-        elif votos_put > votos_call:
-            print(f"--- VOTAÇÃO VENCIDA POR PUT ({votos_put} vs {votos_call}) ---")
-            return {"sinal": "PUT", "expiracao": max(exps_put), "estrategias": strats_put}
-        
-        if votos_call > 0 or votos_put > 0:
-            print(f"--- EMPATE NA VOTAÇÃO ({votos_call} vs {votos_put}) - NENHUMA AÇÃO ---")
-            
-        return None

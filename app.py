@@ -7,9 +7,8 @@ from collections import deque
 from flask import Flask, render_template, jsonify, request
 from iqoptionapi.stable_api import IQ_Option
 from datetime import datetime
-from brain import BrainAI, StudentSLM
-from estrategias import GerenteEstrategia
 from financas import GerenteFinancas
+from telegram_reporter import TelegramReporter
 
 app = Flask(__name__)
 app.json.sort_keys = False # Garante que o JSON respeite a ordem de prioridade (Flask 3.x)
@@ -21,40 +20,48 @@ logging.getLogger('werkzeug').setLevel(logging.ERROR)
 # IMPORTANTE: Substitua pelas suas credenciais ou use variáveis de ambiente
 EMAIL = os.getenv("IQ_EMAIL")
 PASSWORD = os.getenv("IQ_PASSWORD")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Variáveis Globais
 api = None
-historico_velas = deque(maxlen=1000) # Aumentado para 1000 para suportar backtests e análises longas
+historico_velas = deque(maxlen=50) # Reduzido para 50 conforme solicitado
 ativo_atual = None
 thread_atualizacao = None
-ordens_em_andamento = [] # Lista de ordens abertas para checagem via API
 cache_ativos_otc = []
-trading_enabled = False # Começa desligado por segurança (Vermelho)
 ultima_vela_analisada = None
-tipo_opcao = 'BLITZ' # 'BLITZ' (Binária/Turbo) ou 'DIGITAL'
 window = None # Referência global para a janela
+ultima_vela_viva_id = None # Controle para detectar nascimento da vela
 
-# --- SHADOW TRACKING (RASTREAMENTO FANTASMA) ---
-# Placar de Validação da IA
-score_ia = {"acertos_bloqueio": 0, "erros_bloqueio": 0}
-bloqueios_pendentes = [] # Fila de sinais bloqueados aguardando validação
-consecutive_errors = 0 # Contador para recalibração de humor da IA
-
-gerente_estrategia = GerenteEstrategia()
 gerente_financas = GerenteFinancas()
-ia_brain = BrainAI(api_key=os.getenv("GROQ_API_KEY")) # Carrega a chave do ambiente (bot_load.bat)
-ia_aluna = StudentSLM(groq_api_key=os.getenv("GROQ_API_KEY")) # Inicializa a IA Local com acesso ao Tribunal Groq
+telegram_reporter = TelegramReporter(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, gerente_financas)
 
 def conectar_api():
     global api
+    if api is None:
+        print("Inicializando nova instância da API...")
+        api = IQ_Option(EMAIL, PASSWORD)
+    
     print("Tentando conectar...")
-    api = IQ_Option(EMAIL, PASSWORD)
     check, reason = api.connect()
     if check:
         print("Conectado com sucesso!")
+        try:
+            api.update_ACTIVES_OPCODE() # Atualiza lista interna de ativos para evitar erros no get_candles
+            api.change_balance("PRACTICE") # Força uma chamada inicial para validar
+        except Exception as e:
+            print(f"Erro ao definir conta Practice: {e}")
     else:
         print(f"Erro na conexão: {reason}")
     return check
+
+def garantir_conexao():
+    """Verifica se a API está conectada e tenta reconectar se necessário."""
+    global api
+    if api is None or not api.check_connect():
+        print("⚠️ Conexão perdida ou inexistente. Tentando reconectar...")
+        return conectar_api()
+    return True
 
 def formatar_vela(vela, ativo):
     """Formata a vela conforme solicitado (ID, from, to, open, close, etc)"""
@@ -71,336 +78,155 @@ def formatar_vela(vela, ativo):
         "horario_formatado": datetime.fromtimestamp(vela['from']).strftime('%H:%M:%S')
     }
 
-def loop_checagem_resultados():
-    """
-    Thread dedicada a verificar o resultado das ordens na API.
-    Evita slippage e garante que o resultado seja o oficial da corretora.
-    """
-    global ordens_em_andamento
-    while True:
-        if not api or not ordens_em_andamento:
-            time.sleep(1)
-            continue
-            
-        for ordem in ordens_em_andamento[:]:
-            try:
-                tipo = ordem.get('tipo', 'BINARY')
-                fechada = False
-                lucro = 0.0
-                
-                if tipo == 'DIGITAL':
-                    # Digital usa check_win_digital_v2 (bloqueia até fechar)
-                    check, lucro = api.check_win_digital_v2(ordem['id'])
-                    if check:
-                        fechada = True
-                else:
-                    # Binária/Blitz usa check_win_v3 (bloqueia até fechar)
-                    resultado, lucro = api.check_win_v3(ordem['id'])
-                    if resultado:
-                        fechada = True
-                
-                if fechada:
-                    print(f"Ordem {ordem['id']} ({tipo}) finalizada na API. Verificando saldo...")
-                    
-                    # Delay de segurança para a corretora atualizar o saldo
-                    time.sleep(1.5) 
-                    
-                    # --- VERIFICAÇÃO FINANCEIRA SUPREMA ---
-                    # Ignora o status da API e olha para o dinheiro na conta
-                    status_financeiro, diff_real = gerente_financas.verificar_resultado_financeiro(api)
-                    win = (status_financeiro == "WIN")
-                    
-                    print(f"💰 Auditoria Financeira: {status_financeiro} (Diferença: {diff_real:.2f})")
-                    
-                    # Notifica o Gerente de Estratégias (Auditoria do Analista)
-                    # for nome_st in ordem.get('estrategias', []):
-                    #    gerente_estrategia.notificar_resultado_api(nome_st, win, lucro)
-                    
-                    # --- TREINAMENTO PARALELO (ML) ---
-                    if 'contexto_ml' in ordem:
-                        resultado_real = status_financeiro # WIN ou LOSS baseado no saldo
-                        # Salva telemetria rica para a Aluna estudar
-                        terreno_op = ordem['contexto_ml'].get('terreno', 'DESCONHECIDO')
-                        contexto_tecnico_op = ordem.get('contexto_tecnico', {})
-                        ia_aluna.registrar_telemetria(ordem['contexto_ml'], contexto_tecnico_op, ordem['contexto_ml']['decisao_groq'], resultado_real, terreno_op)
-                        
-                        # --- FEEDBACK IMEDIATO (VERIFICAÇÃO) ---
-                        ia_aluna.registrar_resultado_operacao(ordem.get('sinal'), resultado_real, diff_real)
-                        if win:
-                            ia_brain.log_pensamento(f"✅ Validação: Saldo aumentou! (+{diff_real:.2f})")
-                        else:
-                            ia_brain.log_pensamento(f"❌ PUNIÇÃO: Saldo diminuiu ({diff_real:.2f}). Acionando Tribunal.")
-                        
-                        print(f"📝 Aprendizado Registrado: ID {ordem['id']} | Resultado Financeiro: {resultado_real}")
+def detectar_tendencia(historico, periodo=20):
+    """Calcula a tendência baseada na SMA (Simple Moving Average)"""
+    if len(historico) < periodo:
+        return "INDETERMINADO"
+    
+    # Pega os fechamentos das últimas X velas
+    fechamentos = [v['close'] for v in list(historico)[-periodo:]]
+    media = sum(fechamentos) / periodo
+    preco_atual = historico[-1]['close']
+    
+    if preco_atual > media:
+        return "ALTA"
+    elif preco_atual < media:
+        return "BAIXA"
+    return "LATERAL"
 
-                        # --- AUTO-REFLEXÃO (PROCEED_LOSS) ---
-                        if not win:
-                            threading.Thread(target=ia_aluna.refletir_sobre_erro, args=("PROCEED_LOSS", ordem.get('sinal', 'UNKNOWN'), contexto_tecnico_op, list(historico_velas)[-15:])).start()
-                        
-                    ordens_em_andamento.remove(ordem)
-                    
-                    # Libera a trava para a próxima operação
-                    gerente_financas.em_operacao = False
-            except Exception as e:
-                print(f"Erro ao checar ordem {ordem['id']}: {e}")
-                # Em caso de erro crítico, libera a trava para não congelar o bot
-                gerente_financas.em_operacao = False
+def verificar_baixa_liquidez(historico, num_velas=3):
+    """
+    Detecta se o mercado está em 'linha reta' (baixa liquidez/dojis seguidos).
+    Retorna True se o mercado estiver parado (perigoso para operar).
+    """
+    if len(historico) < num_velas:
+        return False
+
+    ultimas = list(historico)[-num_velas:]
+    
+    # Calcula a média do tamanho dos corpos (Open - Close)
+    soma_corpos = sum(abs(v['close'] - v['open']) for v in ultimas)
+    media_corpos = soma_corpos / num_velas
+    
+    # Se a média dos corpos for menor que 2 pontos (0.00010), é linha reta/doji
+    if media_corpos < 0.00010:
+        return True
         
-        # Mostra relógio no console (Feedback visual)
-        if api:
-            ts = api.get_server_timestamp()
-            restante = 60 - (ts % 60)
-            print(f"\r⏳ Vela fecha em: {restante}s | Ordens: {len(ordens_em_andamento)}   ", end="")
-            
-            # Atualiza o título da janela (Feedback Visual na Tela de Status)
-            if window:
-                try:
-                    window.set_title(f"Tela de Status | ⏳ Vela: {restante}s | 📉 Ordens: {len(ordens_em_andamento)}")
-                except: pass
+    return False
+
+def analisar_sinal_indicador(historico):
+    """
+    AQUI VAI A LÓGICA DO SEU INDICADOR/SCRIPT.
+    Analisa o histórico e retorna "CALL", "PUT" ou None.
+    """
+    # O script "JUST Win" olha até a vela 8 (close[8]), então precisamos de pelo menos 10 velas
+    if len(historico) < 10:
+        return None
+
+    # --- FILTRO DE LIQUIDEZ (LINHA RETA) ---
+    if verificar_baixa_liquidez(historico):
+        return None # Mercado morto, ignora qualquer sinal
+
+    # Mapeamento do Script Lua para Python:
+    # close (atual/última fechada) -> historico[-1]
+    # close[2] -> historico[-3]
+    # open[2]  -> historico[-3]
+    # close[4] -> historico[-5]
+    # close[8] -> historico[-9]
+    
+    h = historico
+    close_0 = h[-1]['close']
+    close_2 = h[-3]['close']
+    open_2  = h[-3]['open']
+    close_4 = h[-5]['close']
+    close_8 = h[-9]['close']
+    
+    # Lógica de COMPRA (Bull_OTC)
+    # if ((close > close[2]) and (close[2] > open[2]) and (close[4] > close[8]))
+    if (close_0 > close_2) and (close_2 > open_2) and (close_4 > close_8):
+        print(f"💎 SINAL JUST WIN: Padrão de COMPRA detectado")
+        return "CALL"
+
+    # Lógica de VENDA (Bear_OTC)
+    # if ((close < close[2]) and (close[2] < open[2]) and (close[4] < close[8]))
+    if (close_0 < close_2) and (close_2 < open_2) and (close_4 < close_8):
+        print(f"💎 SINAL JUST WIN: Padrão de VENDA detectado")
+        return "PUT"
         
-        time.sleep(1) # Verifica a cada 1 segundo (Melhor para o relógio)
+    return None
+
+def executar_entrada(ativo, direcao):
+    """Envia a ordem para a IQ Option"""
+    global api, gerente_financas, telegram_reporter
+    
+    valor = gerente_financas.valor_aposta
+    expiracao = 1 # 1 Minuto (Binária/Turbo)
+    
+    print(f"🚀 ENVIANDO ORDEM: {direcao} em {ativo} | Valor: ${valor} | Exp: {expiracao}m")
+
+    # Registra que uma operação foi tentada (para o relatório do Telegram)
+    telegram_reporter.registrar_operacao()
+    
+    # Envia a ordem (buy retorna: check, id_da_ordem)
+    status, id_ordem = api.buy(valor, ativo, direcao, expiracao)
+    
+    if status:
+        print(f"✅ Ordem Executada com Sucesso! ID: {id_ordem}")
+    else:
+        print(f"❌ Falha ao executar ordem: {id_ordem}")
 
 def loop_atualizacao_velas():
     """
-    Loop que roda em background.
-    Sincroniza com o horário do servidor e busca a vela assim que ela fecha.
+    Loop simples: Busca velas e atualiza o histórico para a tabela.
     """
-    global ativo_atual, historico_velas, ultima_vela_analisada, bloqueios_pendentes, score_ia, consecutive_errors
-    
+    global ativo_atual, historico_velas, ultima_vela_analisada, ultima_vela_viva_id
+
     while True:
-        if not api or not ativo_atual:
-            time.sleep(1)
+        if not api or not api.check_connect() or not ativo_atual:
+            time.sleep(0.5)
             continue
 
         try:
-            # Pega horário do servidor para referência
             server_time = api.get_server_timestamp()
-            
-            # Busca as últimas 10 velas (leve e rápido)
-            velas = api.get_candles(ativo_atual, 60, 10, server_time)
-            
+            if server_time is None:
+                server_time = int(time.time()) # Fallback para não travar o loop de velas
+
+            # -----------------------------------------------------------------
+            # ATUALIZAÇÃO DO HISTÓRICO (Velas de 1M)
+            # -----------------------------------------------------------------
+            # Busca velas de 60 segundos (periodo=60)
+            velas = api.get_candles(ativo_atual, 60, 3, server_time)
             if velas:
-                # Lógica Robusta:
-                # Calculamos o inicio do minuto atual (Vela Viva)
-                # Qualquer vela com horário ANTERIOR a isso é uma vela FECHADA.
-                ts_minuto_atual = (server_time // 60) * 60
+                # --- DETECÇÃO DE NASCIMENTO DE VELA (VELA VIVA) ---
+                vela_viva = velas[-1] # A última é a que está se formando
                 
-                vela_fechada_nova = None
-                
-                # Procura de trás para frente a primeira vela que já fechou
-                for v in reversed(velas):
-                    if v['from'] < ts_minuto_atual:
-                        vela_fechada_nova = v
-                        break
-                
-                # Se achamos uma vela fechada e ela é nova (ainda não processada)
-                if vela_fechada_nova:
-                    if ultima_vela_analisada is None or vela_fechada_nova['from'] > ultima_vela_analisada:
-                        ultima_vela_analisada = vela_fechada_nova['from']
+                # Se o ID mudou, significa que uma nova vela nasceu
+                if ultima_vela_viva_id != vela_viva['id']:
+                    ultima_vela_viva_id = vela_viva['id']
+                    
+                    # A vela anterior (penúltima) acabou de fechar
+                    if len(velas) >= 2:
+                        vela_fechada_nova = velas[-2]
                         
                         dados_formatados = formatar_vela(vela_fechada_nova, ativo_atual)
-                        historico_velas.append(dados_formatados)
-                        print(f"--- NOVA VELA FECHADA: {dados_formatados['horario_formatado']} ---")
-                        time.sleep(1) # Trava de segurança: Evita spam de requests no mesmo segundo
                         
-                        # --- SHADOW TRACKING: VALIDAÇÃO DOS BLOQUEIOS ANTERIORES ---
-                        # Verifica se a vela que acabou de fechar confirmou ou negou o bloqueio da IA
-                        if bloqueios_pendentes:
-                            fechamento_atual = dados_formatados['close']
-                            for bloqueio in bloqueios_pendentes:
-                                entrada = bloqueio['preco_entrada']
-                                sinal_bloqueado = bloqueio['sinal']
-                                contexto_do_bloqueio = bloqueio['contexto']
-                                contexto_ml_bloqueio = bloqueio.get('contexto_ml', {})
-                                
-                                # Lógica: Se bloqueou CALL, torcemos para cair (Loss evitado). Se subir, IA errou.
-                                if sinal_bloqueado == "CALL":
-                                    if fechamento_atual < entrada:
-                                        score_ia['acertos_bloqueio'] += 1
-                                        ia_brain.log_pensamento(f"✅ Validação: Bloqueio de CALL correto. Preço caiu (Loss evitado).")
-                                        consecutive_errors = 0
-                                        if contexto_ml_bloqueio:
-                                            ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "LOSS", contexto_ml_bloqueio.get('terreno'))
-                                            ia_aluna.reward_rule_for_block() # Supervisor: Recompensa regra
-                                    elif fechamento_atual > entrada:
-                                        score_ia['erros_bloqueio'] += 1
-                                        ia_brain.log_pensamento(f"❌ Validação: Bloqueio de CALL incorreto. Preço subiu (Win perdido).")
-                                        consecutive_errors += 1
-                                        if contexto_ml_bloqueio:
-                                            ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "WIN", contexto_ml_bloqueio.get('terreno'))
-                                            ia_aluna.penalize_rule_for_miss() # Supervisor: Penaliza regra
-                                        # Aciona Auto-Reflexão (MISSED_WIN)
-                                        threading.Thread(target=ia_aluna.refletir_sobre_erro, args=("MISSED_WIN", "CALL", contexto_do_bloqueio, list(historico_velas)[-15:])).start()
-                                
-                                # Lógica: Se bloqueou PUT, torcemos para subir (Loss evitado). Se cair, IA errou.
-                                elif sinal_bloqueado == "PUT":
-                                    if fechamento_atual > entrada:
-                                        score_ia['acertos_bloqueio'] += 1
-                                        ia_brain.log_pensamento(f"✅ Validação: Bloqueio de PUT correto. Preço subiu (Loss evitado).")
-                                        consecutive_errors = 0
-                                        if contexto_ml_bloqueio:
-                                            ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "LOSS", contexto_ml_bloqueio.get('terreno'))
-                                            ia_aluna.reward_rule_for_block() # Supervisor: Recompensa regra
-                                    elif fechamento_atual < entrada:
-                                        score_ia['erros_bloqueio'] += 1
-                                        ia_brain.log_pensamento(f"❌ Validação: Bloqueio de PUT incorreto. Preço caiu (Win perdido).")
-                                        consecutive_errors += 1
-                                        if contexto_ml_bloqueio:
-                                            ia_aluna.registrar_telemetria(contexto_ml_bloqueio, contexto_do_bloqueio, "BLOCK", "WIN", contexto_ml_bloqueio.get('terreno'))
-                                            ia_aluna.penalize_rule_for_miss() # Supervisor: Penaliza regra
-                                        # Aciona Auto-Reflexão (MISSED_WIN)
-                                        threading.Thread(target=ia_aluna.refletir_sobre_erro, args=("MISSED_WIN", "PUT", contexto_do_bloqueio, list(historico_velas)[-15:])).start()
+                        # Evita duplicatas e atualiza histórico
+                        if not historico_velas or historico_velas[-1]['id'] != dados_formatados['id']:
+                            historico_velas.append(dados_formatados)
+                            print(f"\n--- 1M | NOVA VELA NASCEU ({vela_viva['id']}) | Fechou: {dados_formatados['horario_formatado']} ---")
                             
-                            bloqueios_pendentes = [] # Limpa a fila após validar
-
-                        # --- TRAVA DE SEGURANÇA FINANCEIRA ---
-                        if gerente_financas.em_operacao:
-                            print(f"\r⏳ Aguardando atualização de saldo da operação anterior...", end="")
-                            continue # Pula todo o resto e volta para o início do loop
-
-                        # Processa estratégias e verifica se houve sinal de entrada
-                        lista_sinais, contexto_atual, resultados_finalizados = gerente_estrategia.processar(list(historico_velas))
-
-                        # Salva o resultado das operações simuladas (Trading OFF) que acabaram de finalizar
-                        for res in resultados_finalizados:
-                            if 'contexto_ml' in res and res['contexto_ml']:
-                                terreno_sim = res['contexto_ml'].get('terreno', 'DESCONHECIDO')
-                                ia_aluna.registrar_telemetria(res['contexto_ml'], contexto_atual, "PROCEED", res['resultado'], terreno_sim)
-
-                        resultado_op = gerente_financas.autorizar_operacao(lista_sinais)
-                        # Se houver algum sinal detectado, processa cada um individualmente
-                        votos_call = sum(1 for s in lista_sinais if s['sinal'] == 'CALL')
-                        votos_put = sum(1 for s in lista_sinais if s['sinal'] == 'PUT')
-                        historico_para_ml = list(historico_velas)[-200:]
-                        historico_compactado_ml = ia_brain._compactar_historico_csv(historico_para_ml)
-                        
-                        # --- CLASSIFICAÇÃO DE TERRENO (IA ALUNA) ---
-                        terreno_atual = ia_aluna.classificar_terreno(contexto_atual)
-                        
-                        contexto_ml_atual = {
-                            "votos_call": votos_call,
-                            "votos_put": votos_put,
-                            "historico_csv": historico_compactado_ml,
-                            "terreno": terreno_atual,
-                            "decisao_groq": "PENDING"
-                        }
-                        
-                        if resultado_op:
-                            sinal = resultado_op['sinal']
-                            # A expiração agora é decidida pela IA Aluna. O valor de resultado_op['expiracao'] é ignorado.
-                            estrategias_ativas = resultado_op['estrategias']
+                            # --- GATILHO IMEDIATO: Analisa e Opera ---
+                            sinal = analisar_sinal_indicador(list(historico_velas))
+                            if sinal:
+                                print(f"⚡ SINAL RÁPIDO DETECTADO: {sinal}")
+                                threading.Thread(target=executar_entrada, args=(ativo_atual, sinal)).start()
                             
-                            # --- LÓGICA DE RECALIBRAÇÃO (MEMÓRIA CURTA) ---
-                            historico_analise = list(historico_velas)
-                            if consecutive_errors >= 3:
-                                print(f"⚠️ MODO RECALIBRAÇÃO: Ignorando histórico longo devido a {consecutive_errors} erros consecutivos. Focando no Price Action recente.")
-                                historico_analise = historico_analise[-15:] # Foca apenas nas últimas 15 velas
-
-                            # --- INJEÇÃO DE CONTEXTO DA ALUNA (RALLY) ---
-                            print(f"🎓 IA Aluna: Terreno identificado -> {terreno_atual}")
-                            print(f"📝 Nota da Aluna para o Professor: {ia_aluna.regra_atual}")
-
-                            # --- NOVA VALIDAÇÃO: OLLAMA É O CHEFE ---
-                            # Substituída a chamada da Groq pela IA Local (Aluna)
-                            parecer_obj = ia_aluna.validar_sinal_local(
-                                sinal=sinal,
-                                contexto=contexto_atual,
-                                historico_recente=historico_analise
-                            )
-                            
-                            parecer_ia = parecer_obj.get("decision", "BLOCK")
-                            
-                            # Registra quem tomou a decisão (Ollama agora)
-                            contexto_ml_atual["decisao_groq"] = f"{parecer_ia} (Ollama)"
-
-                            # LÓGICA DE DECISÃO FINAL (Híbrida)
-                            
-                            if parecer_ia == "BLOCK":
-                                source = parecer_obj.get("source", "UNKNOWN")
-                                reason = parecer_obj.get("reason", "Risco não especificado.")
-
-                                if source == "OLLAMA_LOCAL":
-                                    print(f"🛡️ Aluna (Ollama) BLOQUEOU a operação de {sinal}. Motivo: {reason}.")
-                                else: # GROQ_API, API_ERROR, etc.
-                                    print(f"🛑 Bloqueio Técnico/Erro: {reason}.")
-
-                                # FIX: Ignora bloqueios causados por erro de API para não sujar o aprendizado
-                                if "ERROR" not in source and "BUSY" not in source and "NO_API" not in source:
-                                    # Registra para validação na próxima vela (Shadow Tracking)
-                                    bloqueios_pendentes.append({
-                                        "sinal": sinal,
-                                        "preco_entrada": list(historico_velas)[-1]['close'], # Preço de fechamento da vela que gerou o sinal
-                                        "horario": list(historico_velas)[-1]['horario_formatado'],
-                                        "contexto": contexto_atual, # Salva o contexto do momento do bloqueio
-                                        "contexto_ml": contexto_ml_atual # Salva dados para ML
-                                    })
-                                else:
-                                    print(f"⚠️ Bloqueio ignorado para fins de estatística (Origem: {source})")
-
-                                # Libera as estratégias que votaram
-                                gerente_estrategia.processar_resultado_votacao([])
-                            else: # PROCEED
-                                # A IA decide a expiração. Usamos 1 minuto como fallback se a chave não existir.
-                                expiracao_ia = parecer_obj.get("expiration", 1)
-
-                                exp_txt = f"{int(expiracao_ia*60)}s" if expiracao_ia < 1 else f"{int(expiracao_ia)}m"
-                                print(f"🧠 IA Aluna definiu expiração: {exp_txt}")
-                                print(f"SINAL CONFIRMADO PELA IA: {sinal} - Enviando ordem ({tipo_opcao} / {exp_txt})...")
-
-                                if trading_enabled:
-                                    check, order_id = False, None
-                                    
-                                    if tipo_opcao == 'DIGITAL':
-                                        # Digital API requer minutos inteiros (1, 5, 15). Arredondamos para o mais próximo, mínimo 1.
-                                        # Grava saldo ANTES de enviar a ordem
-                                        gerente_financas.registrar_saldo_pre_aposta(api)
-                                        
-                                        exp_digital = max(1, int(round(expiracao_ia)))
-                                        if exp_digital != expiracao_ia:
-                                            print(f"   (Ajustado para Digital: {exp_digital}m)")
-                                        check, order_id = api.buy_digital_spot(ativo_atual, gerente_financas.valor_aposta, sinal.lower(), exp_digital)
-                                    else: # BLITZ ou BINARY
-                                        # Grava saldo ANTES de enviar a ordem
-                                        gerente_financas.registrar_saldo_pre_aposta(api)
-                                        
-                                        check, order_id = api.buy(gerente_financas.valor_aposta, ativo_atual, sinal.lower(), expiracao_ia)
-
-                                    if check:
-                                        print(f"Ordem executada! ID: {order_id}")
-                                        # Registra para monitoramento
-                                        ordens_em_andamento.append({
-                                            "id": order_id,
-                                            "sinal": sinal, # Salva o sinal para reflexão futura
-                                            "estrategias": estrategias_ativas,
-                                            "tipo": tipo_opcao,
-                                            "contexto_ml": contexto_ml_atual, # Anexa contexto para salvar no final
-                                            "contexto_tecnico": contexto_atual # Anexa contexto TÉCNICO para salvar no final
-                                        })
-                                        # Atualiza status: Vencedoras -> Active, Perdedoras -> Idle
-                                        gerente_estrategia.processar_resultado_votacao(estrategias_ativas)
-                                    else:
-                                        print(f"Erro na ordem: {order_id}")
-                                        gerente_financas.em_operacao = False # Destrava se falhou o envio
-                                        # Se falhou o envio, libera todas as estratégias
-                                        gerente_estrategia.processar_resultado_votacao([])
-                                else:
-                                    print(f"SIMULAÇÃO: Sinal {sinal} detectado, mas Trading está OFF. Apenas analisando.")
-                                    # Na simulação não travamos o financeiro pois não gasta saldo
-                                    # Anexa o contexto de ML nas estratégias para logar o resultado simulado na próxima vela
-                                    for strat_name in estrategias_ativas:
-                                        gerente_estrategia.estrategias[strat_name]['contexto_ml'] = contexto_ml_atual
-                                    # Marca as estratégias como ativas para que o Analista verifique o Win/Loss na próxima vela
-                                    gerente_estrategia.processar_resultado_votacao(estrategias_ativas)
-                        else:
-                            # Se não houve consenso (empate), libera quem estava esperando
-                            gerente_estrategia.processar_resultado_votacao([])
+                            ultima_vela_analisada = vela_fechada_nova['from']
 
         except Exception as e:
-            print(f"Erro no monitoramento: {e}")
+            print(f"Erro no loop 30s: {e}")
         
-        # Polling constante de 1 segundo
-        # Isso garante que pegamos a vela assim que ela estiver disponível, sem atrasos
-        time.sleep(0.1)
+        time.sleep(1) # Aumentado para 1s para evitar desconexões por excesso de requisições
 
 @app.route('/')
 def index():
@@ -408,30 +234,20 @@ def index():
 
 @app.route('/api/ativos-otc')
 def get_ativos_otc():
-    """Retorna lista de ativos OTC (Cacheado se possível)"""
-    global cache_ativos_otc
-    
-    if not api:
-        if not conectar_api():
-            return jsonify({"erro": "Não foi possível conectar na API"}), 500
-
-    if not cache_ativos_otc:
-        try:
-            # Usamos get_all_ACTIVES_OPCODE que é mais estável que get_all_open_time
-            todos_ativos = api.get_all_ACTIVES_OPCODE()
-            lista_temp = []
-            
-            for ativo in todos_ativos.keys():
-                if 'OTC' in ativo:
-                    lista_temp.append(ativo)
-            
-            cache_ativos_otc = sorted(list(set(lista_temp))) # Remove duplicatas e ordena
-        except Exception as e:
-            print(f"Erro ao buscar ativos: {e}")
-            # Fallback: Lista básica caso a API falhe na listagem
-            cache_ativos_otc = ['EURUSD-OTC', 'GBPUSD-OTC', 'USDJPY-OTC', 'AUDCAD-OTC', 'NZDUSD-OTC', 'USDCHF-OTC']
-    
-    return jsonify(cache_ativos_otc)
+    """Retorna lista estática de ativos OTC para evitar erros de API."""
+    # Lista fixa de ativos OTC mais comuns para garantir estabilidade
+    # Isso evita que o robô tente buscar ativos inválidos ou fechados
+    lista_otc = [
+        {"ativo": "EURUSD-OTC", "payout": 91},
+        {"ativo": "GBPUSD-OTC", "payout": 91},
+        {"ativo": "USDJPY-OTC", "payout": 91},
+        {"ativo": "AUDCAD-OTC", "payout": 89},
+        {"ativo": "NZDUSD-OTC", "payout": 89},
+        {"ativo": "USDCHF-OTC", "payout": 89},
+        {"ativo": "AUDUSD-OTC", "payout": 89},
+        {"ativo": "USDCAD-OTC", "payout": 89},
+    ]
+    return jsonify(lista_otc)
 
 @app.route('/api/selecionar-ativo', methods=['POST'])
 def selecionar_ativo():
@@ -440,33 +256,54 @@ def selecionar_ativo():
     data = request.json
     novo_ativo = data.get('ativo')
     
+    if not garantir_conexao():
+        return jsonify({"erro": "Falha de conexão com a IQ Option"}), 500
+
     if novo_ativo:
         ativo_atual = novo_ativo
         historico_velas.clear() # Limpa histórico anterior
-        gerente_estrategia.resetar() # Reseta estratégias para o novo ativo
         ultima_vela_analisada = None
         
         # Pega horário do servidor para referência precisa
         ts_server = api.get_server_timestamp()
         
-        # Carrega as 750 velas iniciais (histórico aumentado conforme solicitado)
-        velas_raw = api.get_candles(ativo_atual, 60, 750, ts_server)
+        # Mecanismo de retry para sincronização de tempo (até 5 tentativas)
+        if ts_server is None or not isinstance(ts_server, int):
+            print("⚠️ Sincronizando relógio com o servidor...")
+            for i in range(5):
+                if not api.check_connect():
+                    print("Reconectando durante sincronização...")
+                    api.connect()
+                ts_server = api.get_server_timestamp()
+                if isinstance(ts_server, int):
+                    break
+                time.sleep(1)
         
-        # Filtragem Inteligente: Remove apenas se for realmente a vela viva
+        if ts_server is None or not isinstance(ts_server, int):
+            print("⚠️ Aviso: Servidor da corretora demorou a responder. Usando o relógio local do computador como referência.")
+            ts_server = int(time.time()) # Usa a hora da sua máquina como fallback
+            
+        # Carrega as 50 velas iniciais de 60 SEGUNDOS (1M)
+        try:
+            velas_raw = api.get_candles(ativo_atual, 60, 50, ts_server)
+        except Exception as e:
+            print(f"❌ Erro ao baixar velas de {ativo_atual}: {e}")
+            return jsonify({"erro": f"Erro ao carregar gráfico de {ativo_atual}. O ativo pode estar fechado."}), 400
+        
         # A vela atual começa em: (ts_server // 60) * 60
         ts_inicio_atual = (ts_server // 60) * 60
         
-        velas_fechadas = []
+        # Carrega TODAS as velas (incluindo a viva se houver)
         for v in velas_raw:
-            # Só adiciona se o timestamp da vela for ANTERIOR ao inicio da vela atual
-            if v['from'] < ts_inicio_atual:
-                velas_fechadas.append(v)
-        
-        for v in velas_fechadas:
             historico_velas.append(formatar_vela(v, ativo_atual))
             
         if historico_velas:
-            ultima_vela_analisada = historico_velas[-1]['fromTimestamp']
+            # Se a última vela for a viva (timestamp == inicio atual), a última analisada é a penúltima
+            last = historico_velas[-1]
+            if last['fromTimestamp'] == ts_inicio_atual:
+                ultima_vela_analisada = historico_velas[-2]['fromTimestamp'] if len(historico_velas) > 1 else None
+            else:
+                ultima_vela_analisada = last['fromTimestamp']
             
         # Inicia a thread de monitoramento se não existir
         if thread_atualizacao is None or not thread_atualizacao.is_alive():
@@ -477,73 +314,55 @@ def selecionar_ativo():
     
     return jsonify({"erro": "Ativo inválido"}), 400
 
-@app.route('/api/ia/mensagens')
-def get_ia_mensagens():
-    """Retorna mensagens de log da IA Groq."""
-    msgs = ia_brain.obter_mensagens()
-    return jsonify(msgs)
-
 @app.route('/api/tempo-vela')
 def get_tempo_vela():
     """Retorna o tempo restante para o fechamento da vela de 1 minuto."""
-    if not api: return jsonify({"restante": 0})
-    ts = api.get_server_timestamp()
-    restante = 60 - (ts % 60)
+    if not api or not api.check_connect(): return jsonify({"restante": 0, "erro": "API não conectada"})
+    try:
+        ts = api.get_server_timestamp()
+    except Exception:
+        ts = None
+        
+    if ts is None:
+        ts = int(time.time()) # Usa a máquina local para não zerar o cronômetro do front-end
+    restante = int(60 - (ts % 60)) # Ajustado para 60s (1M)
     return jsonify({"restante": restante})
 
 @app.route('/api/historico')
 def get_historico():
-    return jsonify(list(historico_velas))
-
-@app.route('/api/placar-geral')
-def get_placar_geral():
-    """
-    Retorna o placar geral somando os resultados da sessão de cada estratégia.
-    Isso garante que o total bata com a soma dos cards laterais.
-    """
-    # Retorna os contadores globais controlados pelo Gerente (evita duplicação em consensos)
-    return jsonify({
-        "wins": gerente_estrategia.global_wins,
-        "loss": gerente_estrategia.global_loss,
-        "ia_acertos_bloqueio": score_ia['acertos_bloqueio'],
-        "ia_erros_bloqueio": score_ia['erros_bloqueio']
-    })
+    # Cria uma cópia da lista de velas fechadas
+    hist_list = list(historico_velas)
+    
+    # Se a API estiver conectada e um ativo selecionado, busca a vela viva
+    if api and api.check_connect() and ativo_atual:
+        try:
+            # Pega a vela que está se formando AGORA (count=1)
+            velas_live = api.get_candles(ativo_atual, 60, 1, api.get_server_timestamp())
+            if velas_live:
+                v_live = velas_live[0]
+                
+                # Garante que a vela viva não é a última vela já fechada no histórico
+                # (evita duplicata no segundo 00)
+                if not hist_list or hist_list[-1]['id'] != v_live['id']:
+                    # Adiciona a vela viva no final da lista APENAS para o frontend
+                    hist_list.append(formatar_vela(v_live, ativo_atual))
+        except Exception as e:
+            print(f"Erro ao buscar vela viva para o histórico do frontend: {e}")
+            
+    return jsonify(hist_list)
 
 @app.route('/api/tendencia')
 def get_tendencia():
     """Retorna a tendência atual baseada na SMA 20"""
     # Converte o deque para lista para processamento
-    tendencia = gerente_estrategia.detectar_tendencia(list(historico_velas))
+    tendencia = detectar_tendencia(list(historico_velas))
     return jsonify({"tendencia": tendencia})
-
-@app.route('/api/status-estrategias')
-def get_status_estrategias():
-    # Ordena: Active (0) > Waiting (1) > Idle (2)
-    prioridade = {'active': 0, 'waiting': 1, 'idle': 2}
-    
-    resultado = []
-    for k, v in gerente_estrategia.estrategias.items():
-        item = v.copy()
-        item['id'] = k
-        
-        # Modo Fantasma desativado: Todas as estratégias são consideradas operacionais
-        item['is_ghost'] = False
-        
-        resultado.append(item)
-
-    # Ordena por status e depois por nome
-    resultado.sort(key=lambda x: (prioridade.get(x['status'], 2), x['nome']))
-    
-    return jsonify(resultado)
-
-@app.route('/api/estrategias')
-def get_estrategias_raw():
-    """Retorna o dicionário completo das estratégias (Wins, Loss, Config)"""
-    return jsonify(gerente_estrategia.estrategias)
 
 @app.route('/api/saldo')
 def get_saldo():
     """Retorna o saldo e o tipo de conta atual"""
+    if not garantir_conexao():
+        return jsonify({"erro": "Reconectando..."}), 503
     resultado = gerente_financas.obter_saldo(api)
     if "erro" in resultado:
         return jsonify(resultado), 500
@@ -552,6 +371,8 @@ def get_saldo():
 @app.route('/api/alterar-conta', methods=['POST'])
 def alterar_conta():
     """Troca entre conta REAL e PRACTICE"""
+    if not garantir_conexao():
+        return jsonify({"erro": "Sem conexão"}), 500
     tipo = request.json.get('tipo') # Espera 'REAL' ou 'PRACTICE'
     resultado = gerente_financas.alterar_conta(api, tipo)
     if "erro" in resultado:
@@ -564,93 +385,36 @@ def definir_valor():
     resultado = gerente_financas.definir_valor_entrada(dados.get('valor'))
     return jsonify(resultado)
 
-@app.route('/api/tipo-opcao', methods=['GET', 'POST'])
-def gerenciar_tipo_opcao():
-    global tipo_opcao
-    if request.method == 'POST':
-        data = request.json
-        novo_tipo = data.get('tipo')
-        if novo_tipo in ['BLITZ', 'BINARY', 'DIGITAL']:
-            tipo_opcao = novo_tipo
-            print(f"Modo de Operação alterado para: {tipo_opcao}")
-            return jsonify({"status": "ok", "tipo": tipo_opcao})
-        return jsonify({"erro": "Tipo inválido"}), 400
-    return jsonify({"tipo": tipo_opcao})
-
-@app.route('/api/toggle-trading', methods=['POST'])
-def toggle_trading():
-    global trading_enabled
-    data = request.json
-    if 'estado' in data:
-        trading_enabled = bool(data['estado'])
+@app.route('/api/telegram/status')
+def telegram_status():
+    """Rota para testar o envio de mensagens do Telegram"""
+    if telegram_reporter.ativo:
+        telegram_reporter.send_message("🔔 *Status*: O Robô está conectado e operando! 🚀")
+        return jsonify({"status": "ok", "mensagem": "Mensagem de teste enviada para o Telegram."})
     else:
-        trading_enabled = not trading_enabled
-    
-    status = "ATIVADO" if trading_enabled else "DESATIVADO"
-    print(f"--- TRADING {status} ---")
-    return jsonify({"status": "ok", "enabled": trading_enabled})
-
-@app.route('/api/trading-status')
-def get_trading_status():
-    return jsonify({"enabled": trading_enabled})
-
-@app.route('/api/config/tendencia', methods=['GET', 'POST'])
-def config_tendencia():
-    if request.method == 'POST':
-        data = request.json
-        novo_periodo = int(data.get('periodo', 20))
-        gerente_estrategia.config_tendencia['periodo'] = novo_periodo
-        gerente_estrategia.salvar_stats() # Salva alteração no disco
-        return jsonify({"status": "ok", "periodo": novo_periodo})
-    return jsonify(gerente_estrategia.config_tendencia)
-
-@app.route('/api/config/assertividade', methods=['GET', 'POST'])
-def config_assertividade():
-    if request.method == 'POST':
-        data = request.json
-        novo_valor = int(data.get('valor', 60))
-        gerente_estrategia.min_assertividade = novo_valor
-        gerente_estrategia.salvar_stats() # Salva alteração no disco
-        return jsonify({"status": "ok", "valor": novo_valor})
-    return jsonify({"valor": gerente_estrategia.min_assertividade})
-
-@app.route('/api/config/estrategia', methods=['POST'])
-def config_estrategia():
-    data = request.json
-    nome = data.get('nome')
-    config = data.get('config')
-    if nome in gerente_estrategia.estrategias:
-        gerente_estrategia.estrategias[nome]['config'].update(config)
-        gerente_estrategia.salvar_stats() # Salva alteração no disco
-        return jsonify({"status": "ok", "msg": f"Configuração de {nome} atualizada."})
-    return jsonify({"erro": "Estratégia não encontrada"}), 404
-
-@app.route('/api/config/resetar', methods=['POST'])
-def resetar_config_geral():
-    gerente_estrategia.resetar_para_padrao()
-    return jsonify({"status": "ok", "msg": "Todas as estratégias foram resetadas para o padrão de fábrica."})
+        return jsonify({"status": "erro", "mensagem": "Telegram não está configurado ou ativo."}), 400
 
 def start_server():
     app.run(host='127.0.0.1', port=5000, threaded=True, use_reloader=False)
 
 if __name__ == '__main__':
-    # Inicia o servidor Flask em uma thread separada (background)
-    t = threading.Thread(target=start_server)
-    t.daemon = True
-    t.start()
-    
-    # Inicia thread de checagem de resultados
-    t_res = threading.Thread(target=loop_checagem_resultados, daemon=True)
-    t_res.start()
-
-    # Loop de Estudo da IA Aluna (Roda a cada 10 minutos)
-    def loop_estudo_aluna():
-        while True:
-            time.sleep(600) # 10 minutos (Revertido para padrão)
-            ia_aluna.estudar_professor()
-            
-    threading.Thread(target=loop_estudo_aluna, daemon=True).start()
-
-    # Cria a janela nativa da aplicação
-    window = webview.create_window('Tela de Status', 'http://127.0.0.1:5000', width=1000, height=700)
-    webview.start()
+    try:
+        # Inicia o servidor Flask em uma thread separada (background)
+        t = threading.Thread(target=start_server)
+        t.daemon = True
+        t.start()
+        
+        # Inicia a thread de relatórios do Telegram
+        t_telegram = threading.Thread(target=telegram_reporter.loop_relatorio_horario, daemon=True)
+        t_telegram.start()
+        
+        # Cria a janela nativa da aplicação
+        print("🚀 Iniciando interface gráfica...")
+        window = webview.create_window('Tela de Status', 'http://127.0.0.1:5000', width=1000, height=700)
+        webview.start()
+    except Exception as e:
+        print("\n--- 🚨 ERRO CRÍTICO AO INICIAR A APLICAÇÃO 🚨 ---")
+        print(f"Ocorreu um erro que impediu a janela de abrir: {e}")
+        import traceback
+        traceback.print_exc()
+        input("\nPressione ENTER para fechar...")

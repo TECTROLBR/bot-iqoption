@@ -5,6 +5,7 @@ from datetime import datetime
 import time
 import requests
 import json
+import re
 
 class BrainAI:
     def __init__(self, api_key):
@@ -218,7 +219,8 @@ class StudentSLM:
         self.model = "llama3.2:1b" # Modelo leve (Llama 3.2 1B)
         self._lock = threading.Lock()
         self._ollama_lock = threading.Lock()
-        self.regras_dinamicas = self._carregar_regras()
+        self.padrao_fluxo_atual = None # Padrão dinâmico identificado pela IA
+        self.regras_dinamicas = [] # Limpo: Sem regras carregadas
         self.rule_miss_counter = {} # Novo: Contador de erros por regra
         
         # Inicializa Groq para o Tribunal (Anti-Medo)
@@ -244,6 +246,10 @@ class StudentSLM:
         if bb_width > 0.00250 or (media_corpos > 0 and atr > media_corpos * 2.5):
             return "BURACOS (Alta Volatilidade/Risco)"
             
+        # 4. LINHA RETA: Mercado Morto (Baixa Liquidez Extrema)
+        if media_corpos < 0.00010:
+            return "LINHA RETA (Sem Liquidez/Perigo)"
+
         # 2. LAMA: Mercado Lateral ou Bandas muito estreitas
         if tendencia == "LATERAL" or bb_width < 0.00030:
             return "LAMA (Lateral/Choppy)"
@@ -254,86 +260,167 @@ class StudentSLM:
             
         return "LAMA"
 
-    def estudar_professor(self):
-        """Lê o histórico e gera regra via Ollama."""
-        if not os.path.exists(self.arquivo_dados): return
+    def identificar_padrao_dinamico(self, historico_100):
+        """
+        Pede para a IA local (Ollama) analisar as últimas 100 velas 
+        e descrever o comportamento predominante (Price Action Puro).
+        """
+        if len(historico_100) < 100:
+            return None
+
+        print("🧠 IA Aluna: Analisando fluxo de mercado (100 velas) para encontrar padrão...")
+        # Compactamos as velas para economizar processamento da CPU
+        dados_compactos = ""
+        for v in list(historico_100)[-100:]:
+            cor = "G" if v['close'] > v['open'] else "R"
+            # Usando corpo para normalizar pavios e evitar valores muito grandes
+            corpo = abs(v['close'] - v['open'])
+            corpo = corpo if corpo > 0 else 0.00001 # Evita divisão por zero
+            
+            pavio_sup_ratio = (v['max'] - max(v['open'], v['close'])) / corpo
+            pavio_inf_ratio = (min(v['open'], v['close']) - v['min']) / corpo
+            # Formato: Cor|PavioSupRatio|PavioInfRatio
+            dados_compactos += f"{cor}|{pavio_sup_ratio:.2f}|{pavio_inf_ratio:.2f} "
+
+        prompt = f"""
+        Você é um analista de Price Action. Analise esta sequência de 100 velas M1 (formato Cor|PavioSup/Corpo|PavioInf/Corpo):
+        {dados_compactos}
         
-        if not self.groq_client:
-            print("⚠️ ERRO: Groq não conectado. A Aluna está proibida de criar regras sozinha.")
+        Identifique o padrão de fluxo ou anomalia mais repetitivo e lucrativo no momento.
+        Exemplos de padrões: 'retração em pavios longos', 'continuação após 2 velas de força', 'reversão em dojis'.
+        
+        Responda APENAS com a lógica de entrada em formato JSON. Seja direto.
+        {{
+          "padrao_detectado": "Descreva o padrão, ex: Retração em pavios inferiores longos",
+          "condicao_gatilho": "Descreva a condição para entrar, ex: Próxima vela com pavio inferior > 2x corpo",
+          "direcao_sugerida": "CALL ou PUT",
+          "confianca": 0.75
+        }}
+        """
+        try:
+            payload = {
+                "model": self.model, 
+                "prompt": prompt, 
+                "stream": False,
+                "format": "json",
+                "options": {"temperature": 0.3, "num_ctx": 2048}
+            }
+            
+            with self._ollama_lock:
+                response = requests.post(self.ollama_url, json=payload, timeout=120)
+
+            if response.status_code == 200:
+                resp_json = response.json().get("response", "")
+                dados = json.loads(resp_json)
+                print(f"💡 Padrão de Fluxo Identificado: {dados.get('padrao_detectado')} -> {dados.get('direcao_sugerida')}")
+                return dados
+        except Exception as e:
+            print(f"🚨 Erro ao identificar padrão dinâmico: {e}")
+        
+        return None
+
+    def prever_proxima_vela(self, logica_fluxo, historico_10, vela_viva):
+        """
+        Com base na lógica de fluxo atual, nos últimos 10 candles e na vela viva,
+        pede a probabilidade da próxima vela ser de alta ou baixa.
+        """
+        print("🎯 IA Aluna: Analisando probabilidade da próxima vela...")
+        
+        # Prepara os dados das últimas 10 velas + a viva
+        dados_velas = ""
+        for v in list(historico_10):
+            cor = "G" if v['close'] > v['open'] else "R"
+            dados_velas += f"{cor} "
+        
+        # Vela viva
+        cor_viva = "G" if vela_viva['close'] > vela_viva['open'] else "R"
+        corpo_viva = abs(vela_viva['close'] - vela_viva['open'])
+        pavio_sup_viva = vela_viva['max'] - max(vela_viva['open'], vela_viva['close'])
+        pavio_inf_viva = min(vela_viva['open'], vela_viva['close']) - vela_viva['min']
+        
+        info_viva = f"Vela Atual: Cor={cor_viva}, Corpo={corpo_viva:.5f}, PavioSup={pavio_sup_viva:.5f}, PavioInf={pavio_inf_viva:.5f}"
+
+        prompt = f"""
+        Contexto de Mercado (Lógica de Fluxo):
+        - Padrão: {logica_fluxo.get('padrao_detectado')}
+        - Gatilho: {logica_fluxo.get('condicao_gatilho')}
+        - Direção: {logica_fluxo.get('direcao_sugerida')}
+
+        Dados Recentes:
+        - Últimas 10 velas (cor): {dados_velas}
+        - {info_viva}
+
+        Com base em TUDO, qual a probabilidade da PRÓXIMA vela fechar em ALTA (ser verde)?
+        Se a 'Direção Sugerida' for CALL, a probabilidade deve ser > 50%. Se for PUT, < 50%.
+        
+        Responda APENAS com JSON.
+        {{
+            "prob_alta": 78.5,
+            "decisao": "CALL",
+            "expiracao": 1
+        }}
+        """
+        try:
+            payload = {
+                "model": self.model, 
+                "prompt": prompt, 
+                "stream": False,
+                "format": "json",
+                "options": {"temperature": 0.1, "num_ctx": 1024}
+            }
+            
+            with self._ollama_lock:
+                response = requests.post(self.ollama_url, json=payload, timeout=30)
+
+            if response.status_code == 200:
+                resp_json = response.json().get("response", "")
+                dados = json.loads(resp_json)
+                return dados
+        except Exception as e:
+            print(f"🚨 Erro ao prever próxima vela: {e}")
+        
+        return None
+
+    def estudar_professor(self):
+        """Desativado: Não gera mais regras."""
+        pass
+
+    def _adicionar_regra_segura(self, nova_regra):
+        """
+        Valida, limpa e salva uma nova regra se ela seguir o padrão.
+        Evita duplicatas e regras complexas ('Caso contrário').
+        """
+        nova_regra = nova_regra.strip()
+        
+        # 1. Filtros de Sanidade
+        if not nova_regra.startswith("Se "):
+            return # Regra mal formatada ou comentário
+        if "Caso contrário" in nova_regra or "caso contrário" in nova_regra:
+            print(f"🛡️ Filtro: Regra complexa rejeitada -> {nova_regra}")
             return
 
-        print("⚖️ TRIBUNAL (Groq): Iniciando auditoria do diário de trades...")
-        try:
-            with self._lock: # Protege a leitura para evitar conflito com a gravação de trades
-                with open(self.arquivo_dados, "r", encoding="utf-8") as f:
-                    linhas = f.readlines()
-                    dados_recentes = linhas[-30:] # Janela de esquecimento
+        # 2. Deduplicação (Exata)
+        if nova_regra in self.regras_dinamicas:
+            print(f"♻️ Filtro: Regra duplicada ignorada.")
+            return
 
-            if len(dados_recentes) < 5: return
+        # 3. Deduplicação Semântica (Simplificada - Verifica números e variáveis iguais)
+        numeros_nova = re.findall(r"[-+]?\d*\.\d+|\d+", nova_regra)
+        for regra_existente in self.regras_dinamicas:
+            if numeros_nova == re.findall(r"[-+]?\d*\.\d+|\d+", regra_existente):
+                 if ("CALL" in nova_regra and "CALL" in regra_existente) or ("PUT" in nova_regra and "PUT" in regra_existente):
+                     print(f"♻️ Filtro: Regra similar detectada -> {regra_existente}")
+                     return
 
-            csv_texto = "".join(dados_recentes)
-            prompt = f"""
-Você é o "Tribunal de Regras". A IA local (Aluna) está tentando burlar o sistema criando regras impossíveis (como volume negativo) para não operar.
-Sua missão é criar uma regra TÉCNICA, MATEMATICAMENTE VÁLIDA e AGRESSIVA para corrigir isso.
-
-DADOS (CSV):
-{csv_texto}
-Colunas: votos_call,votos_put,terreno,rsi,atr,bb_width,dist_sma,vol_rel,decisao_ia,resultado_real.
-
-REGRAS DE FÍSICA DE MERCADO (NÃO VIOLE):
-1. Volume Relativo (vol_rel) é SEMPRE POSITIVO (> 0). Nunca use < 0.
-2. RSI é entre 0 e 100. RSI < 30 é Sobrevenda (Oportunidade), não apenas "baixa volatilidade".
-3. Omissão (MISSED_WIN) é inaceitável.
-
-Gere APENAS UM JSON com a regra. Sem explicações, sem "redações".
-Exemplo JSON: {{"regra": "Se RSI < 30 e vol_rel > 1.2, autorizar CALL"}}
-
-A regra deve focar em AUTORIZAR (Exposição Positiva).
-"""
-            
-            chat_completion = self.groq_client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model="llama-3.3-70b-versatile",
-                temperature=0.2, # Baixa temperatura para precisão matemática
-            )
-            
-            response_content = chat_completion.choices[0].message.content
-            
-            # Extração de JSON robusta
-            import json
-            start = response_content.find('{')
-            end = response_content.rfind('}') + 1
-            if start != -1 and end != -1:
-                json_str = response_content[start:end]
-                data = json.loads(json_str)
-                nova_regra = data.get("regra", "").strip()
-                
-                if nova_regra:
-                    self.regra_atual = nova_regra
-                    print(f"⚖️ TRIBUNAL (Nova Lei): {self.regra_atual}")
-                    
-                    # Salva a regra aprendida no arquivo permanente
-                    with self._lock:
-                        if nova_regra not in self.regras_dinamicas:
-                            self.regras_dinamicas.append(nova_regra)
-                            with open(self.arquivo_regras, "a", encoding="utf-8") as f:
-                                f.write(f"{nova_regra}\n")
-        except Exception as e:
-            print(f"🚨 Falha ao estudar professor: {e}")
+        with self._lock:
+            self.regras_dinamicas.append(nova_regra)
+            with open(self.arquivo_regras, "a", encoding="utf-8") as f:
+                f.write(f"{nova_regra}\n")
+        print(f"💾 Regra Salva com Sucesso: {nova_regra}")
 
     def _carregar_regras(self):
-        """Carrega regras dinâmicas do arquivo."""
-        if not os.path.exists(self.arquivo_regras): return []
-        try:
-            with open(self.arquivo_regras, "r", encoding="utf-8") as f:
-                regras_filtradas = []
-                forbidden_phrases = ["bloquear qualquer win", "sem exceção", "bloqueie qualquer win"]
-                for line in f:
-                    regra = line.strip()
-                    if regra and not any(phrase in regra.lower() for phrase in forbidden_phrases):
-                        regras_filtradas.append(regra)
-                return regras_filtradas
-        except: return []
+        """Desativado."""
+        return []
 
     def _purge_rule(self, rule_to_delete):
         """Deleta uma regra do arquivo e da memória."""
@@ -382,7 +469,7 @@ A regra deve focar em AUTORIZAR (Exposição Positiva).
         forbidden_phrases = ["bloquear qualquer win", "sem exceção", "bloqueie qualquer win"]
         regras_validas = [r for r in self.regras_dinamicas if not any(phrase in r.lower() for phrase in forbidden_phrases)]
         if not regras_validas: return "Nenhuma regra extra."
-        return " | ".join(regras_validas[-3:])
+        return "\n".join(regras_validas)
 
     def validar_sinal_local(self, sinal, contexto, historico_recente):
         """
@@ -416,6 +503,11 @@ Responda APENAS JSON:
   "reason": "Tendencia favoravel",
   "expiration": 1
 }}
+
+SIGA ESTAS REGRAS:
+1. Se Terreno = ASFALTO e regra no CONSTITUIÇÃO inclui "expiração de 5 minutos", então expiration DEVE ser 5.
+2. Se o ASIFALTO nao for detectado seguir expiração padrão.
+
 """
         try:
             payload = {
@@ -459,6 +551,94 @@ Responda APENAS JSON:
         else:
             print(f"💔 IA Aluna: Errei. Operação de {sinal} deu LOSS ({lucro}).")
 
+    def _calcular_cenarios_reais(self, historico_futuro, preco_entrada):
+        """
+        Calcula matematicamente quais expirações/direções teriam dado WIN
+        baseado no histórico que aconteceu APÓS o erro.
+        Retorna um resumo textual para o Ollama.
+        """
+        if not historico_futuro or len(historico_futuro) < 1:
+            return "Dados insuficientes para backtest."
+
+        resumo = "RESULTADOS REAIS (SIMULAÇÃO):\n"
+        
+        # Testa expirações de 1 a 5 minutos (ou o máximo que tiver de velas)
+        max_minutos = min(5, len(historico_futuro))
+        
+        for i in range(max_minutos):
+            minuto = i + 1
+            vela_alvo = historico_futuro[i] # i=0 é a próxima vela (1 min)
+            fechamento = vela_alvo['close']
+            
+            # Resultado para CALL
+            res_call = "WIN" if fechamento > preco_entrada else ("EMPATE" if fechamento == preco_entrada else "LOSS")
+            # Resultado para PUT
+            res_put = "WIN" if fechamento < preco_entrada else ("EMPATE" if fechamento == preco_entrada else "LOSS")
+            
+            resumo += f"- {minuto} min: CALL={res_call} | PUT={res_put}\n"
+            
+        return resumo
+
+    def _calcular_rsi_lista(self, precos, periodo=14):
+        """Calcula RSI para uma lista de preços (rápido e local)."""
+        if len(precos) < periodo + 1: return [50] * len(precos)
+        
+        deltas = [precos[i] - precos[i-1] for i in range(1, len(precos))]
+        avg_gain = 0
+        avg_loss = 0
+        
+        # Média inicial
+        for i in range(periodo):
+            if deltas[i] > 0: avg_gain += deltas[i]
+            else: avg_loss += abs(deltas[i])
+        avg_gain /= periodo
+        avg_loss /= periodo
+        
+        rsis = [50] * (periodo + 1) # Padding inicial
+        
+        # Cálculo contínuo (Smoothed)
+        for i in range(periodo, len(deltas)):
+            delta = deltas[i]
+            gain = delta if delta > 0 else 0
+            loss = abs(delta) if delta < 0 else 0
+            
+            avg_gain = (avg_gain * (periodo - 1) + gain) / periodo
+            avg_loss = (avg_loss * (periodo - 1) + loss) / periodo
+            
+            if avg_loss == 0: rsi = 100
+            else: rsi = 100 - (100 / (1 + avg_gain/avg_loss))
+            rsis.append(rsi)
+            
+        return rsis
+
+    def _analisar_historico_completo(self, historico, rsi_alvo, sinal_foco):
+        """Varre o histórico (500+ velas) buscando situações com RSI similar."""
+        if len(historico) < 50: return "Histórico insuficiente para análise profunda."
+        
+        precos = [v['close'] for v in historico]
+        rsis = self._calcular_rsi_lista(precos)
+        
+        wins = 0
+        total = 0
+        
+        # Analisa velas passadas (excluindo as últimas 5 para não dar erro de index)
+        for i in range(len(historico) - 6):
+            # Se o RSI histórico for parecido com o atual (+/- 5)
+            if abs(rsis[i] - rsi_alvo) < 5:
+                total += 1
+                # Verifica se a próxima vela foi a favor do sinal
+                prox_fechamento = historico[i+1]['close']
+                atual_fechamento = historico[i]['close']
+                
+                if sinal_foco == "CALL" and prox_fechamento > atual_fechamento: wins += 1
+                elif sinal_foco == "PUT" and prox_fechamento < atual_fechamento: wins += 1
+        
+        if total == 0: return "Nenhuma situação similar encontrada no histórico."
+        
+        taxa = (wins / total) * 100
+        return f"BACKTEST HISTÓRICO (500 velas): Em {total} situações similares (RSI ~{rsi_alvo:.0f}), a taxa de acerto para {sinal_foco} foi de {taxa:.1f}%."
+
+
     def refletir_sobre_erro(self, tipo_erro, sinal, contexto, historico_velas):
         """
         Motor de Auto-Reflexão: Analisa erros (MISSED_WIN ou PROCEED_LOSS).
@@ -474,9 +654,15 @@ Responda APENAS JSON:
         media_20 = contexto.get('media_20', 0)
         dist_sma = close - media_20
         
-        # Formata histórico recente para o prompt
+        # Separa o histórico em: Passado (para contexto) e Futuro (para Backtest)
+        # Assumimos que a 'entrada' foi na vela -1 do contexto passado, mas aqui recebemos um bloco maior.
+        # Vamos pegar a última vela como referência de entrada e as anteriores como contexto.
+        # Nota: historico_velas aqui contém velas que JÁ fecharam.
+        
         hist_str = ""
-        for v in historico_velas:
+        # Pega as últimas 5 velas para contexto visual
+        velas_contexto = historico_velas[-10:-5] if len(historico_velas) > 5 else historico_velas
+        for v in velas_contexto:
             hist_str += f"[{v['open']:.4f}, {v['close']:.4f}, {v['max']:.4f}, {v['min']:.4f}] "
 
         # --- TRIBUNAL GROQ (ANTI-MEDO) ---
@@ -523,12 +709,11 @@ Retorne APENAS JSON: {{"regra": "Se RSI > X e ... autorizar ..."}}
                     nova_regra = data.get("regra", "").strip()
                     
                     if nova_regra:
-                        with self._lock:
-                            self.regras_dinamicas.append(nova_regra)
-                            with open(self.arquivo_regras, "a", encoding="utf-8") as f:
-                                f.write(f"{nova_regra}\n")
-                        self.regra_atual = nova_regra
-                        print(f"🦁 IA Aluna (Groq): Nova Regra Aprendida -> {nova_regra}")
+                        regra_final = nova_regra
+                        
+                        self._adicionar_regra_segura(regra_final)
+                        self.regra_atual = regra_final
+                        print(f"🦁 IA Aluna (Groq): Regra -> {regra_final}")
                 return
             except Exception as e:
                 print(f"🚨 Erro no Tribunal Groq: {e}")
@@ -566,10 +751,7 @@ Nova Regra:
             if response.status_code == 200:
                 nova_regra = response.json().get("response", "").strip().replace("\n", " ")
                 if nova_regra:
-                    with self._lock:
-                        self.regras_dinamicas.append(nova_regra)
-                        with open(self.arquivo_regras, "a", encoding="utf-8") as f:
-                            f.write(f"{nova_regra}\n")
+                    self._adicionar_regra_segura(nova_regra)
                     print(f"💡 IA Aluna (Insight): Nova regra aprendida -> {nova_regra}")
         except Exception as e:
             print(f"🚨 Erro na auto-reflexão: {e}")
